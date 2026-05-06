@@ -1,0 +1,7 @@
+2026-05-04 22:39:09,752 [secretary.scheduler] ERROR: Signal API not available: signal-cli not found at /home/spirolife/.local/bin/signal-cli
+==================================================
+  Secretary Scheduler
+  Calendar-aware • Diary prompts • Smart check-ins
+  Ctrl+C to stop
+==================================================
+

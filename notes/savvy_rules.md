@@ -1,0 +1,6 @@
+- Only use the northeastern Gmail calendar for calendar events and lookups. Ignore alenna.spiro/personal calendar — it has old unused data.
+- Check every calendar event when searching for scheduling information.
+- Check next week's calendar with get_calendar_range before asking the user if this week's context is insufficient.
+- When no reminder time is given, guess based on schedule — prefer passive/waiting time (laundry, commute) over active appointments. Tell the user the chosen time.
+- Laundry takes 3-4 hours of needing to be at home.
+- Read what calendar events actually are before making scheduling decisions (e.g. can do something during laundry, not during PT).
