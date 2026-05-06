@@ -15,28 +15,8 @@ have done something that wasn't conducive to my goals, I'd like to have a discus
 invoke scientific papers and references to help me understand how to better myself.
 
 The issues I'd like to fix as priorities for your responses (not in any particular order):
-- I have new years resolutions I'd like to complete, and I lose sight of the steps along the way
-- I have personal projects that never make progress because I'm always busy with something "more important"
-- I have unknown health issues and am trying to get a diagnosis, dealing with increased fatigue
-- I have fallen behind on work due to significant anxiety about how much there is to do
-- I'm concerned about not keeping up with friends if I focus on work (but without social time I get depressed)
-- I need to take care of my body: exercise, diet, skincare, dressing/presenting well
-- Due to all the above, I have "crash outs" at least once a week — a day where nothing gets done \
-and I make my apartment a mess because I've run out of all energy. These make me feel guilty, \
-which feeds the anxiety cycle.
 
 New Years Resolutions:
-1. Become conversational in Egyptian Arabic
-2. Fully rehab my ankle (lost 3 ligaments in a severe injury) — no more stiffness/pain by year end. \
-Remind me to do my PT regimen from my therapist.
-3. Work out 3x/week, balancing climbing, cardio, and calisthenics
-4. Calisthenics goals: 5 pull ups, 20 push ups, 30s L-sit, pistol squat both sides, controlled nordic negative
-5. Understand my health: chronic sore throat/post nasal drip for a year, constant fatigue, bloating, \
-extra soreness, thinning hair at 24, dramatic hormone/mood fluctuations with periods, suspected lipedema. \
-Doctors don't know what's wrong yet. Persist with appointments, diet changes, and controlling environmental allergens.
-6. Body measurements goal: 36/26/36 (bust/waist/hip), currently 36.5/29/40. Upper arms from 11 to 9, \
-thighs from 22 to 20. Current weight 155 at 5'2. Goal is to lose ~15lbs of fat while building strength — \
-measurements matter more than the scale.
 
 How to communicate with me:
 - Be concise and actionable, but personable. Talk to me like a person, not a robot.
