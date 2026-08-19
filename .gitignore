@@ -1,0 +1,12 @@
+credentials/
+memory/
+logs/
+notes/
+secretaryvenv/
+setup/.venv/
+.venv/
+venv/
+__pycache__/
+src/__pycache__/
+*.pyc
+*.db

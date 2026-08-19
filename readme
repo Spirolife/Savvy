@@ -1,0 +1,172 @@
+# Savvy — Private Secretary
+
+Message from the dev:
+As a PhD student who was juggling classes, research, personal health issues, a social life, and more, I struggled for months to keep a strict calendar (as a type B person). I was constantly changing my own plans due to things like work taking longer than expected or friends asking me to get lunch.
+I had the idea for this secretary 6 months before I created it, because I wasn't sure if it would even be necessary. Now that I use it consistently, it has made it so much easier for me to organize my life. Remember something you need to do during class? Text Savvy "Hey, remind me to do this some time tomorrow."
+Need to completely restructure your day around a new event? Just ask it to. Want to prioritize your new years resolutions and long-term goals? It'll try to fit 15 minutes a day for you to practice your skill or work on your personal projects. I won't say its perfect, and oftentimes I still need to provide it
+some structure on the calendar or email styles first - but the longer you use it, the better it gets. I named it Savvy after my childhood nickname, because I thought of it like a mini-me. I hope Savvy helps you as much as it has helped me. 
+
+A self-hosted AI secretary that connects Claude to your Google Calendar, Gmail, Tasks, and a local diary, with two-way Signal messaging and persistent memory. All long-term storage and retrieval stays on your machine. Only the current message and a small context window are sent to the API.
+
+
+## Features
+
+- **Two interfaces:** Runs as a desktop REPL and as a Signal bot you can text from your phone. Both share the same memory and toolset.
+- **35+ local tools.** Create, update, move, and delete calendar events across multiple Google accounts. Search Gmail, draft replies, send messages, manage labels, archive threads. Manage Google Tasks and task lists. Store and retrieve diary entries and local notes.
+- **Persistent local memory.** SQLite stores all conversations, extracted facts, and session metadata. Ollama generates embeddings locally with `nomic-embed-text` so the semantic memory index never leaves your machine. The retrieval layer combines recency and relevance to inject the most useful past context into each turn.
+- **Automatic fact extraction.** After each exchange, a second model call pulls out concrete commitments, deadlines, and preferences and stores them separately from the conversation log.
+- **Multi-account Google support.** Personal and work accounts can be linked simultaneously. Calendar defaults to one account by config, while email reads from both.
+- **Proactive notification scheduler.** Optional systemd-managed background process that can send context-aware Signal messages (with quiet-hours and daily-budget enforcement) without the main app running.
+
+I intend to add more tools going forward for my personal use, including linking the Google Home API to replace the default Gemini with Savvy. The pipe dream is to be able to run local music from my machine, 
+control my TV and access my local movies, and avoid ads entirely. If you would like a new tool, feel free to let me know!
+
+## Architecture
+
+```
+You ↔ secretary.py ─┬─ Anthropic API (Claude — reasoning + tool use)
+                    ├─ O## Setup
+
+See [SETUP.md](SETUP.md) for full installation instructions covering dependencies, Google OAuth, Signal bot, and the systemd scheduler service.
+
+Quick start (assumes Ollama and Python deps already installed):
+
+​```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+python src/secretary.py
+​```llama (local embeddings)
+                    ├─ SQLite (conversation + fact storage)
+                    ├─ Google APIs (Calendar, Gmail, Tasks)
+                    └─ signal-cli (encrypted two-way messaging)
+```
+
+**What stays on your machine:** full conversation history, extracted facts, embeddings, diary entries, local notes, OAuth tokens.
+
+**What goes to the API:** the current message, a system prompt, a small set of locally-selected relevant context snippets, and a sliding window of recent messages.
+
+## Setup
+
+## Setup
+
+See [SETUP.md](SETUP.md) for full installation instructions covering dependencies, Google OAuth, Signal bot, and the systemd scheduler service.
+
+Quick start (assumes Ollama and Python deps already installed):
+
+​```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+python src/secretary.py
+​```
+
+## Configuration
+
+`credentials/config.json` accepts:
+
+| Key                         | Default                | Description                                   |
+|-----------------------------|------------------------|-----------------------------------------------|
+| `anthropic_model`           | `claude-sonnet-4-6`    | Reasoning model                               |
+| `max_tokens`                | `1024`                 | Max response length                           |
+| `context_top_k`             | `8`                    | Semantically relevant past messages to inject |
+| `recent_window`             | `10`                   | Recent messages in the sliding window         |
+| `signal_api_url`            | `http://localhost:8080`| signal-cli REST endpoint                      |
+| `sender_number`             | —                      | Your Signal number                            |
+| `recipient_number`          | —                      | Authorized recipient number                   |
+| `max_notifications_per_day` | `5`                    | Notification budget                           |
+| `quiet_hours_start`         | `22`                   | No notifications after (24h)                  |
+| `quiet_hours_end`           | `8`                    | No notifications before (24h)                 |
+
+## REPL Commands
+
+| Command     | Description                                          |
+|-------------|------------------------------------------------------|
+| `/bod`      | Morning plan entry (with today's calendar pulled in) |
+| `/eod`      | Evening reflection (compares against `/bod`)         |
+| `/diary`    | Show recent diary entries                            |
+| `/calendar` | Show today's calendar events                         |
+| `/email`    | Show unread counts and recent emails                 |
+| `/memory`   | Memory statistics (messages, facts, sessions)        |
+| `/history`  | Recent conversation history                          |
+| `/facts`    | Stored facts                                         |
+| `/extract`  | Force fact extraction from the last exchange         |
+| `/model`    | Show current model and config                        |
+| `/cost`     | Show session token usage                             |
+| `/forget`   | Clear all memory                                     |
+| `/help`     | Show command list                                    |
+| `/quit`     | Exit                                                 |
+
+## Project Layout
+
+| File                          | Purpose                                                        |
+|-------------------------------|----------------------------------------------------------------|
+| `src/secretary.py`            | Entry point: REPL and Signal bot in one                        |
+| `src/core.py`                 | Shared context gathering, config, fact extraction              |
+| `src/tools.py`                | Tool registry + dispatch (35+ Google/diary/notes tools)        |
+| `src/memory.py`               | SQLite-backed conversation and fact memory + Ollama embeddings |
+| `src/calendar_integration.py` | Google Calendar API wrapper                                    |
+| `src/email_integration.py`    | Gmail API wrapper                                              |
+| `src/google_auth.py`          | Multi-account OAuth flow and token management                  |
+| `src/diary.py`                | Local diary store (BOD / EOD / notes)                          |
+| `src/notifier.py`             | signal-cli wrapper                                             |
+| `src/scheduler.py`            | Background notification scheduler                              |
+| `src/prompt.py`               | System prompts (REPL and Signal variants)                      |
+| `secretary-scheduler.service` | systemd unit for the scheduler                                 |
+
+## Security and Privacy
+
+A quick disclaimer: I'm not a security professional. I'm a developer who cares about keeping my own data on my own machine and limiting what a hallucinating model can do to my calendar, inbox, and files. The notes below describe the design choices I made toward that goal. They are not a formal security audit, and you should make your own judgments before pointing this thing at accounts that matter to you.
+
+### How tools actually run
+
+The Claude API does not execute tools directly. It is stateless and has no access to your Google account, your filesystem, or anything else on your machine. When you give it a list of tools, all it sees is the local tool *definitions* — names, descriptions, and JSON input schemas. When the model decides to use a tool, the API response contains a `tool_use` block, which is just structured JSON describing what the model wants to call and with what arguments.
+
+Savvy's `chat_with_tools` loop in `src/tools.py` reads those blocks, dispatches them to local Python functions (Google API clients, SQLite writes, file I/O), and then sends the results back to the model on the next turn. Within these functions, you can feel free to add diagnostic prints and other checks so you can see the exact parameters the model sends in, to be able to see if any damaging or hallucinatory
+calls occur.
+
+### Confirmation gating
+
+Every tool call is wrapped in `review_tool_call` (`src/tool_diagnostics.py`) before it runs. Tools are tagged with a danger level:
+
+- **Level 0: Read** — read-only. Auto-approved.
+- **Level 1: Internal** — write/modify. Auto-approved unless the model marks the call as `_importance: "high"` (e.g. deleting a recurring meeting), which escalates to a human prompt. The model takes into account relevant facts and rules in each call, so if you previously asked it to regard certain topics as important, it will likely mark those calls as important.
+- **Level 2: External** — destructive or sensitive. Always prompts the user before executing. Usually reserved for any tools that have some external communication, such as sending emails.
+
+If the user denies a call, the tool is never invoked and `"denied"` is returned to the model as the result, so it can choose to do something different on the next turn. This is when you can add stricter validation - domain allowlists for outgoing email, calendar ID checks before deletion, etc.
+
+### What stays local
+
+- All conversation history, extracted facts, and embeddings live in a local SQLite database.
+- Embeddings are generated locally by Ollama using `nomic-embed-text`. The semantic memory index never leaves your machine.
+- Diary entries and notes are written to local files.
+- Google OAuth refresh tokens are stored locally in `credentials/` and never sent to the model or to Anthropic.
+
+### What goes to the API
+
+- The current user message.
+- A system prompt.
+- A small locally-selected context window: the most recent N messages plus the top-K most semantically similar past messages.
+- Stored facts retrieved from the local fact store.
+- Tool definitions (names, descriptions, schemas).
+- Tool results from any calls executed in this turn (just the strings the local tool code chooses to return).
+
+Anthropic's API retention and training policies apply to that data. As of writing 5/6/26 they retain API inputs/outputs for 30 days for abuse monitoring and do not train on it; check their current terms for the latest.
+
+### Practical advice for using it safely
+
+- Review the tool list in `src/tools.py` before running. If any of the 35+ tools are more access than you want, comment them out and they won't be exposed to the model.
+- Run with the most restrictive Google OAuth scopes you can tolerate. The defaults request full Calendar/Gmail/Tasks access; you can tighten them in `src/google_auth.py`.
+- For the Signal bot mode, set `recipient_number` so only messages from your own number are accepted. Without it, anyone who knows your linked Signal number could text the bot.
+- Revoke OAuth access from your Google account settings at any time if something goes wrong. Savvy will simply lose the ability to call those tools until you re-authenticate.
+- The `/forget` REPL command clears all local memory if you want a fresh start.
+
+### What this design does *not* protect against
+
+The limits of security:
+
+- A motivated attacker with local access to your machine can read the SQLite database, OAuth tokens, and config files. Disk encryption (LUKS, FileVault, BitLocker) is your defense there, not this app.
+- A malicious or compromised Anthropic model could theoretically craft tool-use arguments that pass schema validation but do something harmful (e.g. emailing your contacts, deleting calendars). The confirmation gating is meant to catch the most obvious cases of this for level-2 tools, but it is not a substitute for reviewing what the model actually proposes to do, especially for level-1 calls.
+- Prompt injection from email content is a real risk. If you ask the model to summarize an email and that email contains adversarial instructions, the model may try to act on them. The confirmation prompts are your main method of defense here.
+
+If any of this matters to you in a way it doesn't to me, please don't trust my judgment over yours. Read the code, harden what you need to harden.
+
+## License
+
+MIT.
