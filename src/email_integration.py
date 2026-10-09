@@ -346,9 +346,9 @@ def format_emails_for_context(emails):
         return "(no emails)"
     lines = []
     for e in emails:
-        sender = e.get("from", "")
-        if "<" in sender:
-            sender = sender.split("<")[0].strip().strip('"')
+        # Keep the address. Showing only the display name made the model invent
+        # addresses ("kaia.okafor@email.com") whenever it replied or drafted.
+        sender = e.get("from", "").replace('"', "")
         unread = " [UNREAD]" if e.get("is_unread") else ""
         account = f" [{e['account']}]" if e.get("account") else ""
         mid = f" [id:{e['id']}]" if e.get("id") else ""
@@ -365,9 +365,7 @@ def format_thread_for_context(thread_data):
         return "(empty thread)"
     lines = [f"Thread [{thread_data['account']}]:"]
     for msg in thread_data["messages"]:
-        sender = msg.get("from", "")
-        if "<" in sender:
-            sender = sender.split("<")[0].strip().strip('"')
+        sender = msg.get("from", "").replace('"', "")
         lines.append(f"\n--- {sender} | {msg.get('date', '')} ---")
         lines.append(msg.get("body", "(no body)")[:2000])
     return "\n".join(lines)

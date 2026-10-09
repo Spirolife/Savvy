@@ -26,21 +26,25 @@ from diary import (
     has_entry_today, get_today_entries, get_recent_entries,
     get_weekly_summary_data, format_entries_for_context,
 )
+from reminders import pop_due_reminders, requeue
+from tools import chat_with_tools, read_only_tools, request_options
+from core import build_context, SURFACE_TAG
+from prompt import SYSTEM_PROMPT, CHECKIN_INSTRUCTION
+import meals
+import rest
 
 # Import integrations gracefully (may not be set up yet)
 try:
     from calendar_integration import (
-        get_today_events, get_upcoming_events, get_current_event,
-        format_events_for_context,
+        get_today_events, get_next_week_events, format_events_for_context,
+        format_day_for_user,
     )
     CALENDAR_AVAILABLE = True
 except Exception:
     CALENDAR_AVAILABLE = False
 
 try:
-    from email_integration import (
-        get_unread_count, get_important_unread, format_emails_for_context,
-    )
+    import email_integration  # noqa: F401  (availability flag only)
     EMAIL_AVAILABLE = True
 except Exception:
     EMAIL_AVAILABLE = False
@@ -78,19 +82,6 @@ def get_client() -> anthropic.Anthropic:
 
 
 MODEL = load_config().get("anthropic_model", "claude-sonnet-4-6")
-
-
-def ask_llm(client: anthropic.Anthropic, prompt: str, max_tokens: int = 512) -> str:
-    try:
-        resp = client.messages.create(
-            model=MODEL,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return resp.content[0].text.strip()
-    except Exception as e:
-        logger.error(f"API request failed: {e}")
-        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -134,13 +125,17 @@ def can_notify(state: dict, config: dict) -> bool:
     return True
 
 
-def do_send(title: str, body: str, state: dict, config: dict) -> bool:
+def do_send(title: str, body: str, state: dict, config: dict, memory: Memory | None = None) -> bool:
     if not can_notify(state, config):
         return False
     ok = send_notification(title, body, config)
     if ok:
         state["notifications_today"] = state.get("notifications_today", 0) + 1
         save_state(state)
+        # Record it as something Savvy said on Signal, so when the user texts
+        # back "yes, I did" the next turn knows what they're answering.
+        if memory is not None:
+            memory.store("assistant", SURFACE_TAG["signal"] + body)
     return ok
 
 
@@ -157,64 +152,24 @@ def is_within_window(target_time: str, window_minutes: int = 10) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Context gathering
+# Autonomous turns — same prompt and context as a user message
 # ---------------------------------------------------------------------------
-def gather_context(memory: Memory) -> dict:
-    """Gather all available context for the LLM."""
-    ctx = {
-        "now": datetime.now().strftime("%A, %B %d, %Y at %I:%M %p"),
-        "today_events": "",
-        "upcoming_events": "",
-        "current_event": None,
-        "unread_email_count": "",
-        "important_emails": "",
-        "diary_today": "",
-        "diary_recent": "",
-        "recent_conversations": "",
-        "known_facts": "",
-    }
+def autonomous_turn(client: anthropic.Anthropic, memory: Memory, instruction: str,
+                    read_only: bool) -> str:
+    """Run `instruction` through the normal backend with nobody present.
 
-    # Calendar
-    if CALENDAR_AVAILABLE:
-        try:
-            today = get_today_events()
-            ctx["today_events"] = format_events_for_context(today)
-            upcoming = get_upcoming_events(hours_ahead=4)
-            ctx["upcoming_events"] = format_events_for_context(upcoming)
-            ctx["current_event"] = get_current_event()
-        except Exception as e:
-            logger.debug(f"Calendar error: {e}")
-
-    # Email
-    if EMAIL_AVAILABLE:
-        try:
-            counts = get_unread_count()
-            ctx["unread_email_count"] = ", ".join(f"{l}: {n}" for l, n in counts.items())
-            important = get_important_unread(max_results=3)
-            ctx["important_emails"] = format_emails_for_context(important)
-        except Exception as e:
-            logger.debug(f"Email error: {e}")
-
-    # Diary
-    today_diary = get_today_entries()
-    ctx["diary_today"] = format_entries_for_context(today_diary)
-    recent_diary = get_recent_entries(days=3)
-    ctx["diary_recent"] = format_entries_for_context(recent_diary)
-
-    # Memory
-    recent = memory.retrieve_recent(n=15)
-    if recent:
-        lines = []
-        for msg in recent:
-            ts = datetime.fromtimestamp(msg["timestamp"]).strftime("%b %d %I:%M %p")
-            lines.append(f"[{ts}] {msg['role']}: {msg['content'][:200]}")
-        ctx["recent_conversations"] = "\n".join(lines[-10:])
-
-    facts = memory.retrieve_facts("goals deadlines tasks projects resolutions", top_k=15)
-    if facts:
-        ctx["known_facts"] = "\n".join(f"- {f}" for f in facts)
-
-    return ctx
+    Same system prompt, rules, goals, facts, calendar and history as a message
+    from the user (core.build_context), styled for Signal. read_only limits it to
+    level-0 tools, for runs that should report rather than act.
+    """
+    config = load_config()
+    options, max_tokens = request_options(config, MODEL, config.get("signal_max_tokens", 2000))
+    system, messages = build_context(instruction, memory, SYSTEM_PROMPT, surface="signal")
+    reply, _, _ = chat_with_tools(
+        client, MODEL, system, messages, max_tokens=max_tokens,
+        tools=read_only_tools() if read_only else None, options=options,
+    )
+    return reply.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +194,7 @@ def bod_prompt(state: dict, config: dict):
         try:
             events = get_today_events()
             if events:
-                cal_context = f"\n\nYour calendar for today:\n{format_events_for_context(events)}"
+                cal_context = f"\n\nToday:\n{format_day_for_user(events)}"
         except Exception:
             pass
 
@@ -285,14 +240,12 @@ def eod_prompt(state: dict, config: dict):
 
 
 def smart_checkin(client: anthropic.Anthropic, memory: Memory, state: dict, config: dict, checkin_label: str):
-    """
-    Smart check-in that decides whether to notify based on context.
-    
-    Key behavior: if the LLM determines there's nothing worth notifying about,
-    it responds with NONE and no Signal message is sent.
-    
-    If there's a vague calendar block (e.g. "work on personal project"),
-    the LLM looks at goals/NYRs/project log and recommends specifics.
+    """Check-in that decides whether to message at all.
+
+    Runs through the full backend with read-only tools, so it can look at the
+    calendar, tasks and email for itself, and asks for updates on whatever the
+    user planned but hasn't reported. If nothing is worth saying the model
+    answers NONE and nothing is sent.
     """
     today = datetime.now().strftime("%Y-%m-%d")
     checkin_key = f"last_checkin_{checkin_label}_{today}"
@@ -300,69 +253,16 @@ def smart_checkin(client: anthropic.Anthropic, memory: Memory, state: dict, conf
         return
 
     logger.info(f"Running smart check-in: {checkin_label}")
-    ctx = gather_context(memory)
-
-    prompt = f"""You are a private secretary. Current time: {ctx['now']}
-
-TODAY'S CALENDAR:
-{ctx['today_events']}
-
-NEXT 4 HOURS:
-{ctx['upcoming_events']}
-
-{"CURRENTLY IN: " + ctx['current_event']['summary'] if ctx['current_event'] else ""}
-
-UNREAD EMAILS: {ctx['unread_email_count']}
-{("IMPORTANT UNREAD:" + chr(10) + ctx['important_emails']) if ctx['important_emails'] and ctx['important_emails'] != '(no emails)' else ""}
-
-TODAY'S DIARY:
-{ctx['diary_today']}
-
-RECENT DIARY (last 3 days):
-{ctx['diary_recent']}
-
-RECENT CONVERSATIONS:
-{ctx['recent_conversations']}
-
-KNOWN FACTS, GOALS, AND COMMITMENTS:
-{ctx['known_facts']}
-
----
-
-You are doing a {checkin_label} check-in. Evaluate whether there is anything \
-worth notifying the user about RIGHT NOW. Consider:
-
-1. UPCOMING EVENTS: Is there something in the next 1-2 hours they should prepare for?
-
-2. VAGUE CALENDAR BLOCKS: If there's a block like "personal project time", \
-"work on research", "free time", or any non-specific event coming up, look at \
-their goals, new year's resolutions, and project log. Recommend a SPECIFIC \
-thing to work on and why (based on deadlines, momentum, or what they haven't \
-touched in a while).
-
-3. IMPORTANT EMAILS: Anything urgent or from someone important they haven't \
-seen?
-
-4. FORGOTTEN TASKS: Anything from their diary or conversations that seems \
-dropped?
-
-5. ENCOURAGEMENT: If they've been making good progress on something, a brief \
-acknowledgment is welcome.
-
-RULES:
-- If there IS something worth saying, write a concise notification (2-4 sentences).
-  Be specific and actionable. Don't be generic.
-- If there is genuinely NOTHING worth notifying about right now, respond with \
-  exactly the word NONE and nothing else. Do not force a notification.
-- Never be annoying. Quality over quantity.
-- Match the tone to the time of day: morning = energetic, midday = focused, \
-  afternoon = winding down."""
-
-    response = ask_llm(client, prompt, max_tokens=300)
+    try:
+        response = autonomous_turn(client, memory, CHECKIN_INSTRUCTION.format(label=checkin_label),
+                                   read_only=True)
+    except Exception as e:
+        logger.error(f"Check-in [{checkin_label}] failed: {e}")
+        return
     logger.info(f"Check-in [{checkin_label}]: {response[:200]}")
 
     if response and response.strip().upper() != "NONE":
-        do_send(f"Check-in", response, state, config)
+        do_send("Check-in", response, state, config, memory)
 
     state[checkin_key] = True
     save_state(state)
@@ -385,7 +285,6 @@ def weekly_review(client: anthropic.Anthropic, memory: Memory, state: dict, conf
 
     logger.info("Running weekly review")
     weekly_data = get_weekly_summary_data()
-    ctx = gather_context(memory)
 
     bod_summaries = "\n".join(
         f"  {e['date']}: {e['content'][:150]}" for e in weekly_data["bod_entries"]
@@ -393,8 +292,14 @@ def weekly_review(client: anthropic.Anthropic, memory: Memory, state: dict, conf
     eod_summaries = "\n".join(
         f"  {e['date']}: {e['content'][:150]}" for e in weekly_data["eod_entries"]
     ) or "  (none)"
+    next_week = "(calendar unavailable)"
+    if CALENDAR_AVAILABLE:
+        try:
+            next_week = format_events_for_context(get_next_week_events())
+        except Exception as e:
+            logger.error(f"Weekly review calendar fetch failed: {e}")
 
-    prompt = f"""You are a private secretary doing a WEEKLY REVIEW. Today: {ctx['now']}
+    instruction = f"""[Scheduled weekly review — I'm not in this conversation; whatever you write is texted to me.]
 
 MORNING PLANS THIS WEEK ({weekly_data['days_with_bod']}/7 days logged):
 {bod_summaries}
@@ -402,26 +307,180 @@ MORNING PLANS THIS WEEK ({weekly_data['days_with_bod']}/7 days logged):
 EVENING REFLECTIONS THIS WEEK ({weekly_data['days_with_eod']}/7 days logged):
 {eod_summaries}
 
-KNOWN GOALS AND COMMITMENTS:
-{ctx['known_facts']}
+NEXT WEEK'S CALENDAR:
+{next_week}
 
-UPCOMING WEEK CALENDAR:
-{ctx['today_events']}
+Write a thoughtful weekly review (5-8 sentences). Check completed tasks with your tools first.
+1. What I accomplished vs planned
+2. Patterns: what went well, what kept slipping
+3. Goals I made progress on and ones that need attention
+4. 2-3 specific priorities for next week, from the calendar above and my tasks
+5. Honest but encouraging feedback
+Reference my actual entries and goals, not generic advice."""
 
-Write a thoughtful weekly review (5-8 sentences) that:
-1. Summarizes what they accomplished vs planned
-2. Notes patterns (what went well, what kept slipping)
-3. Highlights goals they made progress on and ones that need attention
-4. Suggests 2-3 specific priorities for next week
-5. Gives honest but encouraging feedback
-
-Be specific — reference their actual entries and goals, not generic advice."""
-
-    response = ask_llm(client, prompt, max_tokens=600)
+    try:
+        response = autonomous_turn(client, memory, instruction, read_only=True)
+    except Exception as e:
+        logger.error(f"Weekly review failed: {e}")
+        return
     if response:
-        do_send("Weekly Review", response, state, config)
+        do_send("Weekly Review", response, state, config, memory)
         state[week_key] = True
         save_state(state)
+
+
+def meal_reminder(memory: Memory, state: dict, config: dict):
+    """The weekly "here are your meals" message, on meals.reminder_day at reminder_time.
+
+    Built straight from the plan — no model call — and saved to memory like any
+    other Signal message, so a reply like "move the salmon to Thursday" has the
+    context it's answering.
+    """
+    settings = meals.get_settings()
+    if datetime.now().strftime("%A") != settings["reminder_day"]:
+        return
+    if not is_within_window(settings["reminder_time"], window_minutes=15):
+        return
+    week = meals.reminder_week()
+    key = f"meal_reminder_{week}"
+    if state.get(key):
+        return
+
+    items = [m for m in meals.get_week(week) if m["status"] != "skipped"]
+    n_meals = sum(m["kind"] == "meal" for m in items)
+    n_drinks = sum(m["kind"] == "drink" for m in items)
+    label = datetime.strptime(week, "%Y-%m-%d").strftime("%b %-d")
+    if items:
+        lines = [f"Meals for the week of {label}:"]
+        for m in items:
+            line = f"- {m['main']}" + (" + " + " + ".join(m["sides"]) if m["sides"] else "")
+            line += " (drink)" if m["kind"] == "drink" else ""
+            line += f" — {m['day']}" if m.get("day") else ""
+            lines.append(line)
+        room = []
+        if n_meals < settings["max_meals"] and n_meals + n_drinks < settings["max_total"]:
+            room.append("another meal")
+        if n_drinks < settings["max_drinks"] and n_meals + n_drinks < settings["max_total"]:
+            room.append("a drink")
+        lines.append(f"\n{n_meals} meal(s), {n_drinks} drink(s)"
+                     + (f" — room for {' or '.join(room)}." if room else " — that's a full week."))
+        lines.append("Want to move anything around?")
+    else:
+        ideas = len(meals.get_week(None))
+        lines = [f"Nothing planned for the week of {label} yet"
+                 + (f" — you have {ideas} recipe idea(s) saved." if ideas else ".")
+                 + " Want me to slot some in?"]
+    diet = meals.active_diet()
+    if diet:
+        lines.append(f"(Still on {diet}.)")
+
+    logger.info(f"Sending meal reminder for week of {week}")
+    if do_send("Meal plan", "\n".join(lines), state, config, memory):
+        state[key] = True
+        save_state(state)
+
+
+def fact_check(memory: Memory, state: dict, config: dict):
+    """Weekly "are these still true?" text for medium-term facts.
+
+    Deterministic, like meal_reminder, and stored as a Signal message so the
+    reply is answered in context: the system prompt says to refresh what the
+    user confirms (save_fact, same wording) and forget_fact the rest.
+    """
+    if datetime.now().strftime("%A") != config.get("fact_check_day", "Saturday"):
+        return
+    if not is_within_window(config.get("fact_check_time", "12:00"), window_minutes=15):
+        return
+    key = f"fact_check_{datetime.now():%Y-%m-%d}"
+    if state.get(key):
+        return
+    state[key] = True
+    save_state(state)
+
+    facts = memory.facts_to_check(limit=config.get("fact_check_count", 3))
+    if not facts:
+        return
+    lines = ["Memory check: are these still true?"]
+    lines += [f"{n}. {f['fact']} (noted {f['age']})" for n, f in enumerate(facts, 1)]
+    lines.append("\nTell me which still hold and which don't. Anything you don't answer just fades over time.")
+    logger.info(f"Fact check: asking about {len(facts)} fact(s)")
+    if do_send("Memory check", "\n".join(lines), state, config, memory):
+        memory.mark_checked([f["id"] for f in facts])
+
+
+REST_INSTRUCTION = """[Scheduled rest-day check — I'm not in this conversation; whatever you write is texted to me.]
+
+A rest day looks worth suggesting:
+{assessment}
+
+Write 2-4 sentences, plain text: say briefly why (the logged bad days, or the packed stretch), \
+suggest the rest-day candidate above (or lightening a day if there's none), and what it could look \
+like — a stay-home day with chores, low-key errands, and one or two specific hobbies or small \
+projects from my Todoist Personal Projects / Fun lists (look them up). A rest day is not "do \
+nothing". Offer to block it on the calendar; don't book anything. No guilt, no lecture."""
+
+
+def rest_day_check(client: anthropic.Anthropic, memory: Memory, state: dict, config: dict):
+    """Crash-out early warning: text once per trigger, at rest_days.check_time."""
+    s = rest.settings(config)
+    if not is_within_window(s["check_time"], window_minutes=15):
+        return
+    today_key = f"rest_checked_{datetime.now():%Y-%m-%d}"
+    if state.get(today_key):
+        return
+    state[today_key] = True
+    save_state(state)
+
+    a = rest.assess(config=config)
+    if not a["trigger"]:
+        return
+    # One message per trigger: the same bad days, or the same packed stretch,
+    # don't re-text every evening.
+    anchor = (",".join(sorted({b["date"] for b in a["bad_days"]})) if a["trigger"] == "bad_days"
+              else a["packed_stretch"][0]["date"])
+    key = f"rest_warning_{a['trigger']}_{anchor}"
+    if state.get(key):
+        return
+    logger.info(f"Rest-day warning: {a['trigger']} ({anchor})")
+    try:
+        msg = autonomous_turn(client, memory, REST_INSTRUCTION.format(assessment=rest.format_assessment(a)),
+                              read_only=True)
+    except Exception as e:
+        logger.error(f"Rest-day check failed: {e}")
+        return
+    if msg and msg.strip().upper() != "NONE" and do_send("Rest day", msg, state, config, memory):
+        state[key] = True
+        save_state(state)
+
+
+def run_due_reminders(client: anthropic.Anthropic, memory: Memory, state: dict, config: dict):
+    """Run any one-off scheduled reminders (from the schedule_reminder tool)
+    that have come due, through the full tool-calling loop — not just a
+    canned message — so conditional instructions can check real data and
+    take real actions before notifying the user."""
+    for reminder in pop_due_reminders():
+        logger.info(f"Running scheduled reminder [{reminder['id']}]: {reminder['instruction'][:100]}")
+        # Full tools: the user asked for this to act ("if I haven't done X, move Y").
+        # Level-2 calls still need a human, and there isn't one, so they're denied.
+        instruction = (
+            "[Scheduled reminder I set up earlier — I'm not in this conversation, so don't ask me "
+            "questions; check what needs checking with your tools, take any real action it "
+            "describes, then write a 2-4 sentence plain-text message telling me what you found "
+            "and did. It will be texted to me.]\n\n"
+            f"Instruction: {reminder['instruction']}"
+        )
+        try:
+            reply = autonomous_turn(client, memory, instruction, read_only=False)
+            reply = reply or "(scheduled check-in ran but produced no message)"
+        except Exception as e:
+            logger.error(f"Scheduled reminder [{reminder['id']}] failed: {e}")
+            reply = f"A scheduled check-in ({reminder['instruction'][:80]}...) failed to run: {e}"
+
+        if do_send("Scheduled Check-in", reply, state, config, memory):
+            logger.info(f"Scheduled reminder [{reminder['id']}] sent")
+        else:
+            logger.info(f"Scheduled reminder [{reminder['id']}] couldn't send (quiet hours/budget) — retrying next cycle")
+            requeue(reminder)
 
 
 # ---------------------------------------------------------------------------
@@ -496,6 +555,18 @@ def run_scheduler():
 
             # --- Weekly review ---
             weekly_review(client, memory, state, config)
+
+            # --- Weekly meal plan ---
+            meal_reminder(memory, state, config)
+
+            # --- Weekly "still true?" check on medium-term facts ---
+            fact_check(memory, state, config)
+
+            # --- Crash-out early warning ---
+            rest_day_check(client, memory, state, config)
+
+            # --- One-off scheduled reminders ---
+            run_due_reminders(client, memory, state, config)
 
         except Exception as e:
             logger.error(f"Scheduler error: {e}", exc_info=True)

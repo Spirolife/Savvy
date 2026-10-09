@@ -1,0 +1,17 @@
+model claude-sonnet-5-5 {'effort': 'medium'} · judge claude-opus-5-5 · embeddings ollama · 10 run(s) → tests/eval/results/20260930-220104
+
+[1/10] PASS  GOAL-01   signal    checks 9/9  rubric 1/1  calls 1/1  requests 3/3  $0.071  (14.8s)
+[2/10] PASS  GOAL-02   signal    checks 8/8  rubric 1/1  calls 3/1  requests 3/3  $0.031  (16.0s)
+[3/10] PASS  GOAL-03   signal    checks 9/9  rubric 1/1  calls 2/1  requests 3/3  $0.029  (12.2s)
+[4/10] FAIL  GOAL-04   signal    checks 7/7  rubric 1/2  calls 0/0  requests 2/2  $0.028  (16.6s)
+        ✗ [judge] Names specific tracked goals with evidence: workouts at 1/3 this week, pull-ups at 2 of 5;  — The reply names workouts (about 1 vs 3) and pull-ups 'stuck at 2', but it omits the 5 target and gives no evidence for Arabic beyond 'steady' (no Anki unit 6); 
+[5/10] FAIL  MEAL-01   signal    checks 10/10  rubric 2/3  calls 1/1  requests 3/3  $0.043  (22.4s)
+        ✗ [judge] Cooks it on a free evening this week — not Tuesday (climbing 7-9), not Friday (dinner out)  — The add_meal call scheduled it for Tuesday, which the rubric explicitly excludes because of climbing 7-9pm, even though Savvy squeezed it in before climbing.
+[6/10] PASS  MEAL-02   signal    checks 9/9  rubric 2/2  calls 3/1  requests 3/3  $0.040  (19.5s)
+[7/10] PASS  MEAL-03   signal    checks 8/8  rubric 1/1  calls 1/1  requests 3/3  $0.032  (14.9s)
+[8/10] PASS  MEAL-04   signal    checks 8/8  rubric 1/1  calls 1/1  requests 3/3  $0.034  (16.5s)
+2026-09-30 22:03:18,625 [secretary.scheduler] INFO: Sending meal reminder for week of 2026-10-12
+[9/10] PASS  MEAL-05   scheduler checks 11/11  rubric 0/0  calls 0/0  requests 0/1  $0.000  (1.8s)
+[10/10] PASS  MEAL-06   signal    checks 8/8  rubric 1/1  calls 1/1  requests 3/3  $0.033  (15.6s)
+
+8/10 runs passed · model under test $0.34 (judge not included) · summary: /var/home/spirolife/Projects/secretary/tests/eval/results/20260930-220104/summary.md

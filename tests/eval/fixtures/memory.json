@@ -1,0 +1,385 @@
+{
+  "_comment": "Seed memory for the eval sandbox. age_days / days_ago are relative to the scenario clock (default Mon 2026-10-05 10:00 ET). Several facts are deliberately stale, contradictory, expired or simply wrong: tests check that decay, recency and forget_fact behave. goals/meals seed the goal tracker and meal planner; next week (Oct 12) is deliberately full (3 meals + 1 drink).",
+  "facts": [
+    {
+      "fact": "User's PhD advisor is Dr. Wei Chen; they have a weekly 1:1 on Tuesdays at 10am.",
+      "type": "stable",
+      "age_days": 200
+    },
+    {
+      "fact": "User has a severe ankle injury (three torn ligaments) and does a daily PT routine prescribed by their physical therapist, Jordan.",
+      "type": "stable",
+      "age_days": 150
+    },
+    {
+      "fact": "Maya Lin is user's closest friend and climbing partner.",
+      "type": "stable",
+      "age_days": 300
+    },
+    {
+      "fact": "Kaia Okafor is a friend from user's cohort who loves trying new restaurants.",
+      "type": "stable",
+      "age_days": 120
+    },
+    {
+      "fact": "User prefers to work out in the afternoon and never before 9am.",
+      "type": "stable",
+      "age_days": 90
+    },
+    {
+      "fact": "User is lactose intolerant.",
+      "type": "stable",
+      "age_days": 400
+    },
+    {
+      "fact": "User's goal is to be conversational in Egyptian Arabic by the end of 2026; they do daily Anki and a weekly Zoom tutor session on Thursdays at 6:30pm.",
+      "type": "stable",
+      "age_days": 270
+    },
+    {
+      "fact": "User wants to reach 5 strict pull-ups by the end of 2026.",
+      "type": "stable",
+      "age_days": 270
+    },
+    {
+      "fact": "User has a cat named Biscuit.",
+      "type": "stable",
+      "age_days": 100,
+      "_note": "WRONG on purpose: the user has no cat. Target of the forget_fact test."
+    },
+    {
+      "fact": "User is in the second year of a PhD at Northeastern.",
+      "type": "situational",
+      "age_days": 60
+    },
+    {
+      "fact": "User is TAing CS 5800 this semester with office hours Thursdays 9-11am.",
+      "type": "situational",
+      "age_days": 35
+    },
+    {
+      "fact": "User's paper draft is due to Dr. Chen on October 14.",
+      "type": "situational",
+      "age_days": 12
+    },
+    {
+      "fact": "User is on a low-FODMAP elimination diet trial through the end of October to investigate bloating.",
+      "type": "situational",
+      "age_days": 20
+    },
+    {
+      "fact": "User can currently do 2 strict pull-ups.",
+      "type": "situational",
+      "age_days": 9
+    },
+    {
+      "fact": "User cannot do a single pull-up yet.",
+      "type": "situational",
+      "age_days": 210,
+      "_note": "STALE: superseded by the 2 pull-ups fact."
+    },
+    {
+      "fact": "User's therapy sessions are on Fridays at 4:15pm at the Longwood clinic.",
+      "type": "situational",
+      "age_days": 15
+    },
+    {
+      "fact": "User's therapy sessions are on Wednesday mornings.",
+      "type": "situational",
+      "age_days": 190,
+      "_note": "STALE: superseded by Fridays."
+    },
+    {
+      "fact": "User does laundry roughly every 10 days and tends to run out of clean clothes before trips.",
+      "type": "situational",
+      "age_days": 45
+    },
+    {
+      "fact": "User's last load of laundry was on September 27.",
+      "type": "situational",
+      "age_days": 8
+    },
+    {
+      "fact": "User is going to New York City with Maya on October 10-11.",
+      "type": "situational",
+      "age_days": 6
+    },
+    {
+      "fact": "User wants to rebuild the habit of working out 3 times a week; lately it has been about once a week.",
+      "type": "situational",
+      "age_days": 14
+    },
+    {
+      "fact": "User skipped the gym on October 3 because they were exhausted.",
+      "type": "ephemeral",
+      "age_days": 2
+    },
+    {
+      "fact": "User had a crash-out day on October 2 and felt guilty about it.",
+      "type": "ephemeral",
+      "age_days": 3
+    },
+    {
+      "fact": "User felt energetic and happy after climbing on September 10.",
+      "type": "ephemeral",
+      "age_days": 25,
+      "_note": "Faded: should not be presented as how they feel now."
+    },
+    {
+      "fact": "User was extremely stressed about a quiz on September 1.",
+      "type": "ephemeral",
+      "age_days": 34,
+      "_note": "EXPIRED (>30d ephemeral): must never be retrieved."
+    },
+    {
+      "fact": "User's knee was hurting on August 15.",
+      "type": "ephemeral",
+      "age_days": 51,
+      "_note": "EXPIRED."
+    }
+  ],
+  "conversations": [
+    {
+      "role": "user",
+      "content": "[Signal] Kaia says there's a new Lebanese place near campus called Zaatar House, we should go sometime",
+      "days_ago": 9
+    },
+    {
+      "role": "assistant",
+      "content": "[Signal] Noted! Want me to pencil in a lunch with Kaia once you two pick a day?",
+      "days_ago": 9
+    },
+    {
+      "role": "user",
+      "content": "[Signal] ugh I skipped the gym again, I was just wiped",
+      "days_ago": 2
+    },
+    {
+      "role": "assistant",
+      "content": "[Signal] That's okay, fatigue is real for you right now. Did you at least get PT in? Even 10 minutes counts toward the ankle rehab.",
+      "days_ago": 2
+    },
+    {
+      "role": "user",
+      "content": "[Signal] yeah did PT. add coffee with Priya tuesday 4:15 after my research block",
+      "days_ago": 1
+    },
+    {
+      "role": "assistant",
+      "content": "[Signal] Done: Coffee with Priya, Tue Oct 6 4:15-4:45 PM on Social, right after your research block.",
+      "days_ago": 1
+    },
+    {
+      "role": "user",
+      "content": "[Signal] climbing with maya was so fun yesterday, did anki too",
+      "days_ago": 0.6
+    },
+    {
+      "role": "assistant",
+      "content": "[Signal] Love that, two goals in one day. Your pull-up work is paying off on the wall too.",
+      "days_ago": 0.6
+    }
+  ],
+  "diary": [
+    {
+      "entry_type": "eod",
+      "date": "2026-10-01",
+      "days_ago": 4,
+      "content": "Decent day. Did PT and Anki. Didn't make it to the gym, stayed late at lab rerunning experiments that still failed."
+    },
+    {
+      "entry_type": "eod",
+      "date": "2026-10-02",
+      "days_ago": 3,
+      "content": "Crash-out day. Stayed in bed until 1, ordered takeout, apartment is a mess. Feel guilty and behind on the paper."
+    },
+    {
+      "entry_type": "eod",
+      "date": "2026-10-03",
+      "days_ago": 2,
+      "content": "Skipped the gym, too tired. Did PT at least. Throat still sore."
+    },
+    {
+      "entry_type": "eod",
+      "date": "2026-10-04",
+      "days_ago": 0.6,
+      "content": "Good day! Climbed with Maya, did Anki, cleaned up the living room a bit."
+    },
+    {
+      "entry_type": "bod",
+      "date": "2026-10-05",
+      "days_ago": 0.1,
+      "content": "Research block this morning, want to get the Fig 3 ablation rerun kicked off. Lecture at 1:30, PT at 5. Low energy but okay."
+    },
+    {
+      "entry_type": "bad_day",
+      "date": "2026-10-02",
+      "days_ago": 3,
+      "content": "Crash-out: stayed in bed until 1, apartment a mess, felt guilty."
+    }
+  ],
+  "task_history": [
+    {
+      "days_ago": 1,
+      "tool": "create_calendar_event",
+      "input": {
+        "summary": "Coffee with Priya",
+        "start_time": "2026-10-06T16:15:00-04:00",
+        "end_time": "2026-10-06T16:45:00-04:00",
+        "calendar_name": "Social"
+      },
+      "result": "{\"success\": true, \"event\": {\"id\": \"evt_priya_coffee\", \"summary\": \"Coffee with Priya\", \"start\": \"2026-10-06T16:15:00-04:00\", \"end\": \"2026-10-06T16:45:00-04:00\", \"calendar\": \"Social\", \"account\": \"northeastern\"}}"
+    },
+    {
+      "days_ago": 3,
+      "tool": "create_task",
+      "input": {
+        "title": "Pack for NYC trip",
+        "task_list": "Chores",
+        "priority": "p2"
+      },
+      "result": "{\"success\": true, \"task\": \"- Pack for NYC trip [p2] @home (#Chores) [task_id:t_pack]\"}"
+    }
+  ],
+  "reminders": [
+    {
+      "id": "r_pt_check",
+      "due_at": "2026-10-05T17:45:00-04:00",
+      "instruction": "Check whether a PT session was logged today (diary or completed Todoist tasks). If not, gently remind me to do my ankle PT before dinner.",
+      "created_at": "2026-10-05T12:00:00+00:00"
+    }
+  ],
+  "goals": [
+    {
+      "key": "arabic",
+      "title": "Become conversational in Egyptian Arabic",
+      "category": "language",
+      "target": "Hold an everyday conversation in Egyptian Arabic",
+      "due_date": "2026-12-31",
+      "progress": [
+        {
+          "note": "Finished Anki deck unit 6",
+          "days_ago": 4
+        }
+      ]
+    },
+    {
+      "key": "ankle",
+      "title": "Fully rehab my ankle",
+      "category": "health",
+      "target": "No stiffness or pain by year end; keep up the PT regimen",
+      "why": "Lost 3 ligaments in a severe injury",
+      "due_date": "2026-12-31"
+    },
+    {
+      "key": "workout",
+      "title": "Work out 3x/week",
+      "category": "fitness",
+      "target": "3 workouts a week, balancing climbing, cardio and calisthenics",
+      "due_date": "2026-12-31",
+      "progress": [
+        {
+          "note": "1 workout this week (climbing)",
+          "value": "1/3",
+          "days_ago": 1
+        }
+      ]
+    },
+    {
+      "key": "pullups",
+      "parent": "workout",
+      "title": "5 pull-ups",
+      "category": "fitness",
+      "target": "5 strict pull-ups",
+      "progress": [
+        {
+          "note": "Can do 2 strict pull-ups",
+          "value": "2",
+          "days_ago": 9
+        }
+      ]
+    },
+    {
+      "key": "lsit",
+      "parent": "workout",
+      "title": "30s L-sit",
+      "category": "fitness",
+      "target": "Hold an L-sit for 30 seconds"
+    },
+    {
+      "key": "health",
+      "title": "Understand my health",
+      "category": "health",
+      "target": "A diagnosis for the fatigue, sore throat, bloating and related symptoms",
+      "due_date": "2026-12-31"
+    }
+  ],
+  "meals": [
+    {
+      "week": "2026-10-05",
+      "kind": "meal",
+      "main": "Lemon herb salmon",
+      "sides": [
+        "roasted broccoli",
+        "cucumber tomato salad"
+      ]
+    },
+    {
+      "week": "2026-10-05",
+      "kind": "meal",
+      "main": "Garlic butter shrimp",
+      "sides": [
+        "sautéed spinach"
+      ]
+    },
+    {
+      "week": "2026-10-05",
+      "kind": "drink",
+      "main": "Mango lassi"
+    },
+    {
+      "week": "2026-10-12",
+      "kind": "meal",
+      "main": "Chicken shawarma bowls",
+      "sides": [
+        "tabbouleh",
+        "pickled red onion"
+      ]
+    },
+    {
+      "week": "2026-10-12",
+      "kind": "meal",
+      "main": "Turkey meatballs",
+      "sides": [
+        "zucchini noodles"
+      ]
+    },
+    {
+      "week": "2026-10-12",
+      "kind": "meal",
+      "main": "Beef and broccoli stir fry",
+      "sides": [
+        "bok choy"
+      ]
+    },
+    {
+      "week": "2026-10-12",
+      "kind": "drink",
+      "main": "Hibiscus iced tea"
+    },
+    {
+      "week": null,
+      "kind": "meal",
+      "main": "Mushroom risotto",
+      "sides": []
+    },
+    {
+      "week": null,
+      "kind": "meal",
+      "main": "Thai green curry",
+      "sides": [
+        "jasmine rice"
+      ]
+    }
+  ]
+}

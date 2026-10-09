@@ -29,10 +29,13 @@ def _get_db() -> sqlite3.Connection:
     return db
 
 
-def store_entry(entry_type: str, content: str, llm_response: str = "") -> int:
-    """Store a diary entry. entry_type is 'bod', 'eod', or 'note'."""
+def store_entry(entry_type: str, content: str, llm_response: str = "", date: str | None = None) -> int:
+    """Store a diary entry. entry_type is 'bod', 'eod', 'note', or 'bad_day'.
+
+    `date` (YYYY-MM-DD) files it under another day, e.g. "yesterday was rough".
+    """
     db = _get_db()
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = date or datetime.now().strftime("%Y-%m-%d")
     cursor = db.execute(
         """INSERT INTO diary (entry_type, content, llm_response, date, timestamp)
            VALUES (?, ?, ?, ?, ?)""",
@@ -89,6 +92,17 @@ def get_recent_entries(days: int = 7) -> list[dict]:
     ]
 
 
+def get_entries_of_type(entry_type: str, since_date: str) -> list[dict]:
+    """Entries of one type dated on or after `since_date` (YYYY-MM-DD), oldest first."""
+    db = _get_db()
+    rows = db.execute(
+        "SELECT entry_type, content, date, timestamp FROM diary WHERE entry_type = ? AND date >= ? "
+        "ORDER BY date, timestamp", (entry_type, since_date),
+    ).fetchall()
+    db.close()
+    return [{"type": t, "content": c, "date": d, "timestamp": ts} for t, c, d, ts in rows]
+
+
 def has_entry_today(entry_type: str) -> bool:
     """Check if a BOD or EOD entry already exists for today."""
     db = _get_db()
@@ -140,7 +154,8 @@ def format_entries_for_context(entries: list[dict]) -> str:
     for e in entries:
         date = e.get("date", "")
         ts = datetime.fromtimestamp(e["timestamp"]).strftime("%-I:%M %p")
-        label = {"bod": "Morning Plan", "eod": "Evening Reflection", "note": "Note"}.get(
+        label = {"bod": "Morning Plan", "eod": "Evening Reflection", "note": "Note",
+                 "bad_day": "Bad day (logged)"}.get(
             e["type"], e["type"]
         )
         lines.append(f"[{date} {ts}] {label}: {e['content'][:300]}")

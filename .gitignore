@@ -5,6 +5,7 @@ notes/
 secretaryvenv/
 setup/.venv/
 .venv/
+.venv-vscodium/
 venv/
 __pycache__/
 src/__pycache__/

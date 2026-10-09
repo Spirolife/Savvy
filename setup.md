@@ -302,10 +302,11 @@ This is what turns Savvy from a generic assistant into one that knows your situa
 
 ### 7a. The system prompt — `src/prompt.py`
 
-There are three prompt variables in `src/prompt.py`:
+The prompt variables in `src/prompt.py`:
 
-- `SYSTEM_PROMPT` — used by the desktop REPL. This is the main one.
-- `SIGNAL_SYSTEM_PROMPT` — used by the Signal bot. Tuned to be more concise and SMS-friendly.
+- `SYSTEM_PROMPT` — the one prompt every surface uses: the desktop REPL, the Signal bot, and scheduled check-ins. This is the one to personalize.
+- `SURFACE_STYLE` — a short reply-style block added per surface. Signal's asks for short, plain-text replies; that is the only difference between Signal and the REPL.
+- `CHECKIN_INSTRUCTION` — what a scheduled check-in is asked to do (look for updates to ask about, upcoming events, vague blocks).
 - `FACT_EXTRACTION_PROMPT` — used internally by the fact extractor. You probably don't need to touch this one.
 
 The default prompt is just a placeholder. The more specific you make it, the better Savvy gets. Things worth including:

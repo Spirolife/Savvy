@@ -9,7 +9,7 @@ Usage:
     python secretary.py --signal    # Signal bot (two-way texting)
 
 Commands (REPL mode):
-    /bod, /eod, /diary, /calendar, /email, /memory,
+    /bod, /eod, /diary, /calendar, /tasks, /email, /memory,
     /history, /facts, /extract, /model, /cost, /forget, /help, /quit
 """
 
@@ -27,12 +27,11 @@ from rich.panel import Panel
 from rich.theme import Theme
 
 from memory import Memory
-from prompt import SYSTEM_PROMPT, SIGNAL_SYSTEM_PROMPT, FACT_EXTRACTION_PROMPT
+from tool_diagnostics import print_fact_saved
 from core import (
-    load_app_config, get_client, get_live_context, build_context,
-    extract_facts, CALENDAR_AVAILABLE, EMAIL_AVAILABLE,
+    load_app_config, get_client, respond, extract_facts,
+    CALENDAR_AVAILABLE, EMAIL_AVAILABLE,
 )
-from tools import chat_with_tools
 from diary import (
     store_entry, get_today_entries, get_recent_entries, format_entries_for_context,
 )
@@ -45,11 +44,15 @@ if EMAIL_AVAILABLE:
     from email_integration import (
         get_unread_count, get_recent_emails, format_emails_for_context,
     )
-
-from notifier import (
-    load_config as load_signal_config, check_signal_cli,
-    send_message, receive_messages,
-)
+try:
+    from todoist_integration import (
+        list_projects as todoist_projects,
+        list_tasks as todoist_list_tasks,
+        format_tasks_for_context,
+    )
+    TODOIST_AVAILABLE = True
+except Exception:
+    TODOIST_AVAILABLE = False
 
 console = Console(theme=Theme({"info": "dim cyan", "warning": "bold yellow"}))
 session_input_tokens = 0
@@ -86,25 +89,16 @@ def handle_bod(client, model, mem):
         return
 
     content = "\n".join(lines)
-    system, messages = build_context(
+    console.print("\n[bold green]Savvy:[/] ", end="")
+    response, _, _ = respond(
+        client, mem,
         f"Here is my morning plan for today:\n\n{content}\n\n"
         "Acknowledge briefly. Flag conflicts with my calendar or forgotten goals. 2-3 sentences.",
-        mem, SYSTEM_PROMPT,
-    )
-
-    console.print("\n[bold green]Savvy:[/] ", end="")
-    response, in_t, out_t = chat_with_tools(
-        client, model, system, messages,
+        surface="repl", store_as=f"[Morning Plan] {content}",
         stream_callback=lambda t: console.print(t, end="", highlight=False),
     )
     console.print()
-
     store_entry("bod", content, response)
-    mem.store("user", f"[Morning Plan] {content}")
-    mem.store("assistant", response)
-    facts = extract_facts(client, model, content, response)
-    for f in facts:
-        mem.store_fact(f)
     console.print()
 
 
@@ -137,25 +131,16 @@ def handle_eod(client, model, mem):
 
     content = "\n".join(lines)
     bod_ref = f"\n\nFor reference, this morning they planned:\n{bod_content}" if bod_content else ""
-    system, messages = build_context(
+    console.print("\n[bold green]Savvy:[/] ", end="")
+    response, _, _ = respond(
+        client, mem,
         f"Here is my evening reflection:{bod_ref}\n\n{content}\n\n"
         "Acknowledge. Compare planned vs actual. Note patterns. Suggest for tomorrow. 3-4 sentences.",
-        mem, SYSTEM_PROMPT,
-    )
-
-    console.print("\n[bold green]Savvy:[/] ", end="")
-    response, _, _ = chat_with_tools(
-        client, model, system, messages,
+        surface="repl", store_as=f"[Evening Reflection] {content}",
         stream_callback=lambda t: console.print(t, end="", highlight=False),
     )
     console.print()
-
     store_entry("eod", content, response)
-    mem.store("user", f"[Evening Reflection] {content}")
-    mem.store("assistant", response)
-    facts = extract_facts(client, model, content, response)
-    for f in facts:
-        mem.store_fact(f)
     console.print()
 
 
@@ -171,6 +156,7 @@ def handle_command(cmd, mem, client, model):
         console.print(Panel(
             "/bod      — Morning plan\n/eod      — Evening reflection\n"
             "/diary    — Recent diary\n/calendar — Today's calendar\n"
+            "/tasks    — Todoist tasks, grouped by project\n"
             "/email    — Recent emails\n/memory   — Memory stats\n"
             "/history  — Conversation history\n/facts    — Stored facts\n"
             "/extract  — Extract facts from last exchange\n"
@@ -199,6 +185,19 @@ def handle_command(cmd, mem, client, model):
         else:
             events = get_today_events()
             console.print(Panel(format_events_for_context(events), title="Today") if events else "[info]Nothing today.[/]")
+    elif c == "/tasks":
+        if not TODOIST_AVAILABLE:
+            console.print("[warning]Todoist not set up. Run: python setup/setup-todoist.py[/]")
+        else:
+            try:
+                for proj in todoist_projects():
+                    rows = todoist_list_tasks(task_list=proj["name"], max_results=500)
+                    if rows:
+                        console.print(Panel(
+                            format_tasks_for_context(rows, show_project=False),
+                            title=f"{proj['name']} ({len(rows)})"))
+            except Exception as e:
+                console.print(f"[warning]Todoist error: {e}[/]")
     elif c == "/email":
         if not EMAIL_AVAILABLE:
             console.print("[warning]Gmail not set up.[/]")
@@ -292,17 +291,15 @@ def run_repl():
             if inp.strip().lower() == "/extract":
                 if last_u and last_a:
                     for f in extract_facts(client, model, last_u, last_a):
-                        mem.store_fact(f)
-                        console.print(f"  [info]Stored: {f}[/]")
+                        print_fact_saved(f["fact"], f["type"], mem.store_fact(f["fact"], f["type"]))
                 continue
             if handle_command(inp, mem, client, model):
                 continue
 
-        system, messages = build_context(inp, mem, SYSTEM_PROMPT)
         console.print("[bold green]Savvy:[/] ", end="")
         try:
-            response, in_t, out_t = chat_with_tools(
-                client, model, system, messages,
+            response, in_t, out_t = respond(
+                client, mem, inp, surface="repl", config=config,
                 stream_callback=lambda t: console.print(t, end="", highlight=False),
             )
             session_input_tokens += in_t
@@ -312,12 +309,7 @@ def run_repl():
             console.print(f"[warning]{e}[/]")
             continue
 
-        mem.store("user", inp)
-        mem.store("assistant", response)
         last_u, last_a = inp, response
-
-        for f in extract_facts(client, model, inp, response):
-            mem.store_fact(f)
         console.print()
 
 def get_user_input() -> str:
@@ -343,104 +335,9 @@ def get_user_input() -> str:
 # SIGNAL BOT MODE
 # ===================================================================
 def run_signal():
-    logger = logging.getLogger("savvy.signal")
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
-
-    config = load_app_config()
-    sig = load_signal_config()
-    model = config.get("anthropic_model", "claude-sonnet-4-6")
-
-    try:
-        client = get_client(config)
-    except ValueError as e:
-        logger.error(str(e))
-        return
-
-    sender = sig.get("sender_number", "")
-    allowed = sig.get("recipient_number", "")
-    if not sender:
-        logger.error("Set sender_number in config.json")
-        return
-
-    status = check_signal_cli(sig)
-    if not status["ok"]:
-        logger.error(f"signal-cli: {status['error']}")
-        return
-    logger.info(f"signal-cli: {status['version']}")
-
-    try:
-        client.messages.create(model=model, max_tokens=10, messages=[{"role": "user", "content": "ping"}])
-        logger.info(f"Claude: connected ({model})")
-    except Exception as e:
-        logger.error(f"Claude: {e}")
-        return
-
-    logger.info(f"Signal Bot started — {sender}")
-    logger.info(f"Calendar: {'yes' if CALENDAR_AVAILABLE else 'no'} | Email: {'yes' if EMAIL_AVAILABLE else 'no'}")
-
-    mem = Memory(session_id="signal_bot")
-    convo: list[dict] = []
-    MAX_H = 10
-    seen = set()
-
-    while True:
-        try:
-            for msg in receive_messages(sig):
-                source, text, ts = msg["source"], msg["message"], msg.get("timestamp", 0)
-                if ts in seen:
-                    continue
-                seen.add(ts)
-                if allowed and source != allowed:
-                    continue
-
-                logger.info(f"In: {text[:100]}")
-
-                # Build context
-                live = get_live_context()
-                ctx = [f"Current time: {datetime.now().strftime('%A, %B %d, %Y at %I:%M %p')}"]
-                for v in [live["calendar"], live["email"], live["diary"]]:
-                    if v:
-                        ctx.append(v)
-
-                relevant = mem.retrieve_relevant(text, top_k=5)
-                if relevant:
-                    ctx.append("RELEVANT PAST:\n" + "\n".join(
-                        f"[{datetime.fromtimestamp(m['timestamp']).strftime('%b %d %I:%M %p')}] {m['role']}: {m['content'][:200]}"
-                        for m in relevant))
-
-                facts = mem.retrieve_facts(text, top_k=8)
-                if facts:
-                    ctx.append("KNOWN FACTS:\n" + "\n".join(f"- {f}" for f in facts))
-
-                system = SIGNAL_SYSTEM_PROMPT.format(context="\n\n".join(ctx))
-                msgs = list(convo[-MAX_H:]) + [{"role": "user", "content": text}]
-
-                try:
-                    reply, _, _ = chat_with_tools(client, model, system, msgs, max_tokens=500)
-                    reply = reply.strip() or "(done)"
-                except Exception as e:
-                    logger.error(f"Claude: {e}")
-                    reply = "Sorry, hit an error. Try again."
-
-                mem.store("user", f"[Signal] {text}")
-                mem.store("assistant", f"[Signal] {reply}")
-                convo.append({"role": "user", "content": text})
-                convo.append({"role": "assistant", "content": reply})
-                while len(convo) > MAX_H * 2:
-                    convo.pop(0)
-
-                logger.info(f"Out: {reply[:100]}")
-                send_message(reply, sig)
-
-                for f in extract_facts(client, model, text, reply):
-                    mem.store_fact(f)
-
-            if len(seen) > 1000:
-                seen = set(sorted(seen)[-500:])
-
-        except Exception as e:
-            logger.error(f"Error: {e}", exc_info=True)
-        time.sleep(5)
+    """Same loop the systemd service runs — one Signal implementation, not two."""
+    from signal_bot import run_bot
+    run_bot()
 
 
 # ===================================================================

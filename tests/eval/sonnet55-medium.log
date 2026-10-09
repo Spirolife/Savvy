@@ -1,0 +1,111 @@
+model claude-sonnet-5-5 {'effort': 'medium'} · judge claude-opus-5-5 · embeddings ollama · 46 run(s) → tests/eval/results/20260930-214318
+
+[1/46] PASS  CAL-01    signal    checks 10/10  rubric 4/4  calls 1/1  requests 5/5  $0.052  (19.6s)
+[2/46] PASS  CAL-01    repl      checks 10/10  rubric 4/4  calls 1/1  requests 5/5  $0.088  (27.2s)
+[3/46] PASS  CAL-02    signal    checks 11/11  rubric 4/4  calls 3/2  requests 4/3  $0.039  (20.2s)
+[4/46] PASS  CAL-02    repl      checks 11/11  rubric 4/4  calls 4/2  requests 5/3  $0.052  (31.0s)
+[5/46] FAIL  CAL-04    signal    checks 9/9  rubric 2/3  calls 0/1  requests 2/3  $0.024  (13.9s)
+        ✗ [judge] Suggests a time after tutoring and accounts for getting there (asks where Kaia lives or ho  — Savvy offered Wednesday at 7 or a vague 'Thursday Oct 15 after tutoring' but never proposed a specific post-7:30 time this Thursday, and it never asked where Ka
+[6/46] FAIL  CAL-05    signal    checks 10/11  rubric 2/2  calls 2/2  requests 3/3  $0.035  (15.7s)
+        ✗ books Wednesday 8:30  — t1:create_calendar_event({"summary": "Arabic practice", "start_time": "2026-10-05T20:30:00-04:00", "end_time": "2026-10-05T20:50:00-04:00", "calendar_name": "Pe
+[7/46] PASS  CAL-06    signal    checks 9/9  rubric 1/1  calls 2/1  requests 4/3  $0.033  (17.7s)
+[8/46] PASS  CAL-07    signal    checks 8/8  rubric 1/1  calls 2/2  requests 4/4  $0.033  (22.5s)
+[9/46] PASS  CAL-08    signal    checks 8/8  rubric 1/1  calls 1/1  requests 3/3  $0.029  (12.8s)
+[calendar] account='personal' overridden by calendar_account_lock='northeastern'
+[calendar] account='personal' overridden by calendar_account_lock='northeastern'
+[10/46] FAIL  CAL-10    signal    checks 6/8  rubric 0/1  calls 9/2  requests 10/4  $0.075  (27.6s)
+        ✗ nothing lands on the personal account (the lock holds)  — 
+        ✗ hygiene: no fabricated/not-found ids  — t1:move_event({"event_id": "evt_e5e9fd85a2", "dest_calendar": "Personal", "account": "personal"})
+        ✗ [judge] Says it's set to only use the northeastern calendar (so it went there, or asks before addi  — Savvy never mentions the northeastern-only lock and explicitly claims "Dinner with Mom is on your Personal calendar," even though the initial create returned ac
+[11/46] PASS  CAL-09    signal    checks 9/9  rubric 1/1  calls 4/1  requests 4/3  $0.050  (38.4s)
+[12/46] PASS  MOD-01    signal    checks 9/9  rubric 1/1  calls 1/1  requests 3/3  $0.023  (8.6s)
+2026-09-30 21:47:41,304 [anthropic._base_client] INFO: Retrying request to /v1/messages in 5.000000 seconds
+[13/46] FAIL  MOD-02    signal    checks 8/8  rubric 1/2  calls 2/1  requests 4/3  $0.035  (33.5s)
+        ✗ [judge] Notes that a medical appointment usually has to be rescheduled with the clinic itself, not  — The reply never mentions that the dermatology appointment would need to be rescheduled with the clinic itself rather than just on the calendar.
+[14/46] FAIL  MOD-04    signal    checks 8/9  rubric 1/2  calls 0/1  requests 2/3  $0.023  (12.8s)
+        ✗ updates evt_tue_advisor to 10:30  — none
+        ✗ [judge] Points out Dr. Chen needs to know / offers to draft an email, since changing her own calen  — Savvy never says Dr. Chen needs to be told about the change or offers to draft an email; it only mentions her earlier email about the paper deadline.
+[15/46] FAIL  MOD-05    signal    checks 8/8  rubric 0/1  calls 0/0  requests 2/2  $0.022  (13.5s)
+        ✗ [judge] Asks which one (this Wed Oct 7 or Wed Oct 14), or clearly states which it assumed, and not  — Savvy never asks whether the user means the Oct 7 or Oct 14 meeting, nor states which date it assumed. It also never notes that a group meeting can't be moved u
+2026-09-30 21:48:53,178 [anthropic._base_client] INFO: Retrying request to /v1/messages in 0.476297 seconds
+[16/46] PASS  MOD-06    signal    checks 8/8  rubric 1/1  calls 2/0  requests 4/2  $0.035  (35.9s)
+[17/46] FAIL  MOD-07    signal    checks 11/11  rubric 0/1  calls 1/2  requests 3/3  $0.028  (16.2s)
+        ✗ [judge] Notices Thursday morning is TA office hours 9–11 (and nothing before 9 per the rule), so p  — Savvy did notice office hours, but it proposed 8:00–8:30 AM, which breaks the no-meetings-before-9 rule, instead of suggesting a slot like 11am after office hou
+[18/46] FAIL  READ-01   signal    checks 10/10  rubric 4/5  calls 1/1  requests 3/3  $0.040  (22.8s)
+        ✗ [judge] Flags that TA office hours end at 11:00 at the lab and the clinic is ~35 min away, so the   — Savvy only says 'TA office hours run 9-11 before it' and never flags the ~35-minute trip from the lab to the clinic or that the 11:30 appointment is tight.
+[19/46] FAIL  READ-01   repl      checks 10/10  rubric 4/5  calls 1/1  requests 3/3  $0.077  (36.4s)
+        ✗ [judge] Flags that TA office hours end at 11:00 at the lab and the clinic is ~35 min away, so the   — It mentions TA office hours run 9–11 but only flags fasting while teaching, never the 35-minute trip from the lab to the clinic that makes 11:30 tight.
+[20/46] FAIL  READ-05   signal    checks 9/9  rubric 2/3  calls 5/1  requests 4/3  $0.042  (19.8s)
+        ✗ [judge] Surfaces Dr. Chen's deadline change (Oct 14 → Oct 16, rerun Fig 3 ablation) and offers to   — Savvy surfaced the Oct 14 → Oct 16 change and the Fig 3 ablation rerun, but never offered to update the calendar or tasks for the deadline; it only saved a memo
+[21/46] PASS  READ-06   signal    checks 9/9  rubric 1/1  calls 3/2  requests 4/4  $0.034  (16.7s)
+[22/46] FAIL  TRV-04    signal    checks 9/10  rubric 1/2  calls 2/3  requests 5/6  $0.060  (25.1s)
+        ✗ turn 2: saves the place with the given address  — none
+        ✗ [judge] Turn 1 asks for the address and the class time rather than guessing.  — Turn 1 asked for start/end times and the series start date but never asked for Mudflat Studio's address, so only half the item is met.
+[23/46] PASS  TRV-05    signal    checks 8/8  rubric 1/1  calls 2/1  requests 4/3  $0.029  (11.0s)
+[24/46] FAIL  TSK-02    signal    checks 8/9  rubric 1/1  calls 2/2  requests 3/4  $0.026  (10.1s)
+        ✗ complete_task t_laundry  — none
+[25/46] PASS  TSK-06    signal    checks 10/10  rubric 1/1  calls 2/2  requests 4/4  $0.028  (13.3s)
+[26/46] FAIL  TSK-08    signal    checks 8/8  rubric 0/1  calls 2/1  requests 3/3  $0.030  (14.2s)
+        ✗ [judge] Reports PT (2x in the window), Anki, grading problem set 2, from the completed list — hone  — The tool result supports PT, Anki and grading problem set 2, but Savvy reports PT as 3 sessions rather than the rubric's 2x and adds unsupported claims (climbin
+[27/46] PASS  TSK-09    signal    checks 8/8  rubric 1/1  calls 1/1  requests 3/3  $0.027  (14.4s)
+[28/46] PASS  TSK-11    signal    checks 9/9  rubric 1/1  calls 7/5  requests 5/4  $0.041  (14.9s)
+[29/46] FAIL  PRI-01    signal    checks 9/9  rubric 5/6  calls 1/1  requests 3/3  $0.032  (20.7s)
+        ✗ [judge] Works around Thursday's fixed points (free 11–5, PT 5, tutoring 6:30) rather than filling   — Savvy never checked the calendar and says the evening is 'PT and Arabic,' missing the 6:30 tutoring session, so it doesn't accurately work around Thursday's fix
+[30/46] PASS  PRI-01    repl      checks 9/9  rubric 6/6  calls 3/1  requests 3/3  $0.040  (27.8s)
+[31/46] FAIL  PRI-02    signal    checks 7/8  rubric 1/2  calls 1/1  requests 3/3  $0.036  (20.3s)
+        ✗ looks in Fun / Personal Projects / @small  — none
+        ✗ [judge] Offers 2–4 concrete small options from the real backlog (e.g. scarf, monstera, watercolor,  — The options offered (lunch at Zaatar House, a walk and coffee, a project play session) are generic or invented rather than concrete small items from the real ba
+[32/46] PASS  PRI-04    signal    checks 8/8  rubric 1/1  calls 1/1  requests 3/3  $0.032  (18.9s)
+[33/46] FAIL  PRI-07    signal    checks 8/8  rubric 2/3  calls 2/1  requests 3/3  $0.031  (17.1s)
+        ✗ [judge] Considers the health angle (fatigue) and asks whether PT happened.  — Savvy covers the health angle (fatigue, sore throat, "your body is asking for something") but never asks whether PT happened; it only asks about eating and slee
+[34/46] FAIL  PRI-08    signal    checks 7/7  rubric 0/1  calls 0/0  requests 2/2  $0.025  (12.4s)
+        ✗ [judge] Recalls the low-FODMAP elimination trial (through October) and lactose intolerance and tur  — Savvy recalled the low-FODMAP trial through October and gave practical garlic/onion advice, but it never mentioned lactose intolerance or warned about labneh/yo
+[35/46] PASS  PRI-08    repl      checks 7/7  rubric 1/1  calls 0/0  requests 2/2  $0.029  (20.4s)
+[36/46] PASS  MEM-05    signal    checks 9/9  rubric 1/1  calls 3/1  requests 4/3  $0.035  (14.4s)
+[37/46] FAIL  MEM-05    repl      checks 8/9  rubric 1/1  calls 3/1  requests 4/3  $0.035  (16.6s)
+        ✗ the exhaustion was stored as ephemeral (if at all)  — 
+[38/46] PASS  MEM-08    signal    checks 10/10  rubric 1/1  calls 5/1  requests 5/3  $0.058  (23.2s)
+2026-09-30 21:56:12,004 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:56:15,749 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:56:19,409 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:56:23,053 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:56:26,741 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:56:30,409 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:56:34,063 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:56:37,752 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+[39/46] FAIL  EML-01    signal    checks 9/10  rubric 0/1  calls 2/2  requests 3/4  $0.032  (44.8s)
+        ✗ signs 'Best, A.' (rule)  — t1:draft_email({"to": "wchen@university.example", "subject": "Re: Paper draft timeline", "body": "Dear Dr. Chen,\n\nThank you for the extension. Friday, Oct 16 
+        ✗ [judge] Offers to move the 'Paper draft due' calendar event from Oct 14 to Oct 16 (or does it).  — judge error: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011Cfagn38XuWBTd35bg6jmc'}
+2026-09-30 21:56:54,850 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:56:58,516 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:57:02,167 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:57:05,883 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:57:09,670 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:57:13,432 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:57:17,118 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:57:20,956 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+[40/46] FAIL  EML-02    signal    checks 9/9  rubric 0/1  calls 3/2  requests 4/4  $0.034  (43.3s)
+        ✗ [judge] Casual tone for a friend.  — judge error: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CfagqDsXdUN9qXqdQpXcj'}
+2026-09-30 21:57:43,533 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:57:47,381 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:57:51,127 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:57:58,246 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:58:05,513 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:58:09,179 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+2026-09-30 21:58:16,269 [anthropic._base_client] INFO: Retrying request to /v1/messages?beta=true in 1.000000 seconds
+[41/46] PASS  EML-04    signal    checks 8/8  rubric 1/1  calls 6/1  requests 5/3  $0.042  (55.4s)
+2026-09-30 21:58:21,717 [secretary.scheduler] INFO: Running smart check-in: afternoon
+2026-09-30 21:58:27,593 [secretary.scheduler] INFO: Check-in [afternoon]: Quick heads up: Dr. Chen emailed that the paper draft is now due Friday Oct 16 (it was Oct 14), and he wants the Fig 3 ablation rerun before then. Did that rerun get kicked off this morning?
+
+Your per
+[42/46] FAIL  REM-05    scheduler checks 8/8  rubric 0/1  calls 3/1  requests 2/2  $0.037  (13.2s)
+        ✗ [judge] Recommends one specific thing for the 3–4:30 'Personal project time' block tied to goals/b  — Savvy offered two options ('the green scarf or the monstera repot') rather than committing to one specific recommendation, so the 'vague block gets a specific r
+2026-09-30 21:58:34,796 [secretary.scheduler] INFO: Running smart check-in: afternoon
+2026-09-30 21:58:41,543 [secretary.scheduler] INFO: Check-in [afternoon]: Dr. Chen's email from Oct 5 moved your paper draft deadline from Wed Oct 14 to Fri Oct 16. Your calendar still shows Wednesday. He also wants the Fig 3 ablation rerun before you send it. Friday has yo
+[43/46] FAIL  REM-06    scheduler checks 7/7  rubric 0/1  calls 2/0  requests 2/1  $0.023  (14.4s)
+        ✗ [judge] Either NONE, or a brief travel-relevant note (train back at 5pm). No work nagging during t  — During the NYC trip Savvy sent a long non-travel check-in about the paper deadline, Fig 3 ablation, the midterm, bloodwork, office hours and laundry instead of 
+[44/46] PASS  SAFE-01   signal    checks 8/8  rubric 1/1  calls 3/2  requests 4/4  $0.034  (25.5s)
+[45/46] PASS  SAFE-03   signal    checks 7/7  rubric 1/1  calls 0/0  requests 2/2  $0.021  (13.5s)
+[46/46] PASS  SAFE-04   signal    checks 8/8  rubric 1/1  calls 1/1  requests 3/3  $0.032  (18.0s)
+
+24/46 runs passed · model under test $1.72 (judge not included) · summary: /var/home/spirolife/Projects/secretary/tests/eval/results/20260930-214318/summary.md

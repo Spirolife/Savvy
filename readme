@@ -6,16 +6,18 @@ I had the idea for this secretary 6 months before I created it, because I wasn't
 Need to completely restructure your day around a new event? Just ask it to. Want to prioritize your new years resolutions and long-term goals? It'll try to fit 15 minutes a day for you to practice your skill or work on your personal projects. I won't say its perfect, and oftentimes I still need to provide it
 some structure on the calendar or email styles first - but the longer you use it, the better it gets. I named it Savvy after my childhood nickname, because I thought of it like a mini-me. I hope Savvy helps you as much as it has helped me. 
 
-A self-hosted AI secretary that connects Claude to your Google Calendar, Gmail, Tasks, and a local diary, with two-way Signal messaging and persistent memory. All long-term storage and retrieval stays on your machine. Only the current message and a small context window are sent to the API.
+A self-hosted AI secretary that connects Claude to your Google Calendar, Gmail, Todoist, and a local diary, with two-way Signal messaging and persistent memory. All long-term storage and retrieval stays on your machine. Only the current message and a small context window are sent to the API.
 
 
 ## Features
 
 - **Two interfaces:** Runs as a desktop REPL and as a Signal bot you can text from your phone. Both share the same memory and toolset.
-- **35+ local tools.** Create, update, move, and delete calendar events across multiple Google accounts. Search Gmail, draft replies, send messages, manage labels, archive threads. Manage Google Tasks and task lists. Store and retrieve diary entries and local notes.
+- **40+ local tools.** Create, update, move, and delete calendar events across multiple Google accounts. Search Gmail, draft replies, send messages, manage labels, archive threads. Full read/write Todoist: create, list, update, complete, reopen, move, and delete tasks, manage projects and labels, and review what was actually completed. Due dates are deliberately not exposed — these projects are an undated backlog to pull from in spare time, not a schedule, so Savvy can neither read nor set a due date. Store and retrieve diary entries and local notes.
 - **Persistent local memory.** SQLite stores all conversations, extracted facts, and session metadata. Ollama generates embeddings locally with `nomic-embed-text` so the semantic memory index never leaves your machine. The retrieval layer combines recency and relevance to inject the most useful past context into each turn.
-- **Automatic fact extraction.** After each exchange, a second model call pulls out concrete commitments, deadlines, and preferences and stores them separately from the conversation log.
-- **Multi-account Google support.** Personal and work accounts can be linked simultaneously. Calendar defaults to one account by config, while email reads from both.
+- **Automatic fact extraction, with a shelf life.** After each exchange, a second model call pulls out concrete commitments, deadlines, and preferences and stores them separately from the conversation log. Each fact is labelled by how long it stays true — `stable` (goals, health conditions, relationships: never fades), `situational` (current projects and arrangements: ~75-day half-life), or `ephemeral` (moods, energy, single days: ~10-day half-life, deleted after 30). Retrieval ranks by semantic similarity with age as a bounded penalty, so a stale situation sinks below current ones without drowning out clearly relevant facts. Recent short-lived facts ("last laundry Sep 27", "trip Saturday") are also shown every turn as a *current situation* block, since no question about priorities is worded like them. Near-duplicates are merged on write rather than stacking up, and Savvy can store or replace a fact itself (`save_fact`) when you tell it something changed.
+- **Multi-account Google support.** Personal and work accounts can be linked simultaneously. Calendar defaults to one account by config, while email reads from both. The account label is only a local nickname, so authorization resolves the real email address, shows it to you before saving, and records it in the token file; `python src/google_auth.py --verify` re-checks every label against the live account and reports any that are mislabeled.
+- **Travel-time awareness.** A local place book (`notes/places.json`) maps the nicknames you actually use — "lab", "the gym", "home" — to real addresses, and Savvy checks whether a gap between two events is enough to get between them before booking. Routing is the [Google Routes API](https://developers.google.com/maps/documentation/routes), chosen because it covers public transit — open routers like OpenRouteService do not, which makes them useless for a subway commute. Results are cached for a month per route and time-of-day, and durations you've confirmed yourself always win (they need no address and cost no API call). Requests use the narrowest field mask, so this stays on the cheapest billing tier.
+- **Liveness alerts.** Signal message when the bot comes up (🟢, after it has verified Signal and the Claude API) and when a service dies (🔴, with exit status and the tail of its log). The crash path is a systemd `OnFailure=` hook, not in-process, so it still fires on OOM kills and SIGKILLs that leave the process no chance to report itself. Rate-limited so a crash-loop texts once with a running count.
 - **Proactive notification scheduler.** Optional systemd-managed background process that can send context-aware Signal messages (with quiet-hours and daily-budget enforcement) without the main app running.
 
 I intend to add more tools going forward for my personal use, including linking the Google Home API to replace the default Gemini with Savvy. The pipe dream is to be able to run local music from my machine, 
@@ -25,19 +27,11 @@ control my TV and access my local movies, and avoid ads entirely. If you would l
 
 ```
 You ↔ secretary.py ─┬─ Anthropic API (Claude — reasoning + tool use)
-                    ├─ O## Setup
-
-See [SETUP.md](SETUP.md) for full installation instructions covering dependencies, Google OAuth, Signal bot, and the systemd scheduler service.
-
-Quick start (assumes Ollama and Python deps already installed):
-
-​```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-python src/secretary.py
-​```llama (local embeddings)
+                    ├─ Ollama (local embeddings)
                     ├─ SQLite (conversation + fact storage)
-                    ├─ Google APIs (Calendar, Gmail, Tasks)
-                    └─ signal-cli (encrypted two-way messaging)
+                    ├─ Google APIs (Calendar, Gmail)
+                    ├─ Todoist API v1 (tasks, projects, labels)
+                    └─ signal-cli-rest-api container (encrypted two-way messaging)
 ```
 
 **What stays on your machine:** full conversation history, extracted facts, embeddings, diary entries, local notes, OAuth tokens.
@@ -46,9 +40,7 @@ python src/secretary.py
 
 ## Setup
 
-## Setup
-
-See [SETUP.md](SETUP.md) for full installation instructions covering dependencies, Google OAuth, Signal bot, and the systemd scheduler service.
+See [setup.md](setup.md) for full installation instructions covering dependencies, Google OAuth, Signal bot, and the systemd scheduler service.
 
 Quick start (assumes Ollama and Python deps already installed):
 
@@ -56,6 +48,19 @@ Quick start (assumes Ollama and Python deps already installed):
 export ANTHROPIC_API_KEY="sk-ant-..."
 python src/secretary.py
 ​```
+
+`python setup/classify-facts.py` labels facts stored before typing existed; it
+reports by default and only prunes with `--apply`, archiving anything it removes.
+
+To enable travel-time checks, run `python setup/setup-travel.py` — it takes a Google
+Routes API key and verifies it with a live transit route. Note this is a *separate*
+product from the Calendar/Gmail OAuth above: it uses a plain API key and needs a
+billing account on the Cloud project, even within the free allowance.
+
+To enable Todoist, run `python setup/setup-todoist.py` — it stores your personal API
+token (Todoist → Settings → Integrations → Developer) in `credentials/config.json`
+and verifies it against the live API. Without a token, Savvy simply starts without
+the task tools.
 
 ## Configuration
 
@@ -67,8 +72,20 @@ python src/secretary.py
 | `max_tokens`                | `1024`                 | Max response length                           |
 | `context_top_k`             | `8`                    | Semantically relevant past messages to inject |
 | `recent_window`             | `10`                   | Recent messages in the sliding window         |
-| `signal_api_url`            | `http://localhost:8080`| signal-cli REST endpoint                      |
-| `sender_number`             | —                      | Your Signal number                            |
+| `todoist_api_token`         | —                      | Todoist personal API token (or `TODOIST_API_TOKEN` env var) |
+| `calendar_account_lock`     | —                      | Force all event creation onto this account label, overriding whatever the model passes |
+| `default_calendar_account`  | —                      | Account used when a call names none            |
+| `liveness_alerts`           | `true`                 | Signal message on service startup and crash   |
+| `liveness_cooldown_seconds` | `600`                  | Minimum gap between repeats of the same alert |
+| `google_maps_api_key`       | —                      | Routes API key for travel estimates (or `GOOGLE_MAPS_API_KEY` env var) |
+| `default_travel_mode`       | `transit`              | `transit`, `walk`, `bike`, `drive`             |
+| `timezone`                  | `America/New_York`     | Your timezone: defines "today"/date ranges and how times are shown |
+| `travel_buffer_minutes`     | `5`                    | Slack required on top of travel time            |
+| `ollama_restart_command`    | `["systemctl", "--user", "restart", "sh.brew.ollama.service"]` | Run when Ollama is up but embedding fails (the stale-process state after `brew upgrade`); at most every 10 min. `[]` disables |
+| `prompt_cache_ttl`          | `5m`                   | Prompt-cache lifetime for the tools + fixed prompt: `5m` or `1h` (1h costs 2x to write, pays off with 3+ requests an hour) |
+| `signal_max_tokens`         | `2000`                 | Token budget per Signal turn; long replies resume automatically rather than truncating |
+| `signal_api_url`            | `http://localhost:8080`| signal-cli-rest-api container endpoint        |
+| `sender_number`             | —                      | Your linked Signal number                     |
 | `recipient_number`          | —                      | Authorized recipient number                   |
 | `max_notifications_per_day` | `5`                    | Notification budget                           |
 | `quiet_hours_start`         | `22`                   | No notifications after (24h)                  |
@@ -99,15 +116,19 @@ python src/secretary.py
 |-------------------------------|----------------------------------------------------------------|
 | `src/secretary.py`            | Entry point: REPL and Signal bot in one                        |
 | `src/core.py`                 | Shared context gathering, config, fact extraction              |
-| `src/tools.py`                | Tool registry + dispatch (35+ Google/diary/notes tools)        |
-| `src/memory.py`               | SQLite-backed conversation and fact memory + Ollama embeddings |
+| `src/tools.py`                | Tool registry + dispatch (40+ Google/Todoist/diary/notes tools) |
+| `src/memory.py`               | SQLite conversation + typed fact memory, decay scoring, Ollama embeddings |
 | `src/calendar_integration.py` | Google Calendar API wrapper                                    |
+| `src/todoist_integration.py`  | Todoist API v1 wrapper (tasks, projects, labels)               |
+| `src/places.py`               | Local place book: nicknames → addresses, confirmed durations    |
+| `src/travel.py`               | Travel-time estimation (Google Routes API + cache)             |
 | `src/email_integration.py`    | Gmail API wrapper                                              |
-| `src/google_auth.py`          | Multi-account OAuth flow and token management                  |
+| `src/google_auth.py`          | Multi-account OAuth flow, identity confirmation, token management |
 | `src/diary.py`                | Local diary store (BOD / EOD / notes)                          |
-| `src/notifier.py`             | signal-cli wrapper                                             |
+| `src/notifier.py`             | signal-cli-rest-api HTTP client                                |
+| `src/liveness.py`             | Startup/crash Signal alerts (systemd `OnFailure=` target)      |
 | `src/scheduler.py`            | Background notification scheduler                              |
-| `src/prompt.py`               | System prompts (REPL and Signal variants)                      |
+| `src/prompt.py`               | The one system prompt every surface shares, plus per-surface reply style |
 | `secretary-scheduler.service` | systemd unit for the scheduler                                 |
 
 ## Security and Privacy
@@ -153,8 +174,10 @@ Anthropic's API retention and training policies apply to that data. As of writin
 
 - Review the tool list in `src/tools.py` before running. If any of the 35+ tools are more access than you want, comment them out and they won't be exposed to the model.
 - Run with the most restrictive Google OAuth scopes you can tolerate. The defaults request full Calendar/Gmail/Tasks access; you can tighten them in `src/google_auth.py`.
+- A Todoist personal API token grants full read/write over your whole Todoist account — there are no per-scope tokens. `delete_task` is set to danger level 2 (always prompts) because Todoist deletion is not recoverable; `complete_task` is level 1. Revoke the token from Todoist's Integrations settings to cut access.
 - For the Signal bot mode, set `recipient_number` so only messages from your own number are accepted. Without it, anyone who knows your linked Signal number could text the bot.
 - Revoke OAuth access from your Google account settings at any time if something goes wrong. Savvy will simply lose the ability to call those tools until you re-authenticate.
+- Run `python src/google_auth.py --verify` after linking accounts. Picking the wrong Google account in the browser saves it under the other label, which silently points calendar and email operations at the wrong account — the tokens are valid, so nothing errors.
 - The `/forget` REPL command clears all local memory if you want a fresh start.
 
 ### What this design does *not* protect against

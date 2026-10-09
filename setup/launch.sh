@@ -4,7 +4,7 @@
 # Ollama, Signal bot, and Scheduler run in the background.
 # Only the Secretary REPL opens a window.
 
-DIR="$HOME/Documents/Projects/secretary"
+DIR="$HOME/Projects/secretary"
 SRC="$DIR/src"
 ACT="source $DIR/.venv/bin/activate"
 export PATH="$HOME/.local/bin:$PATH"

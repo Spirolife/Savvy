@@ -1,0 +1,8 @@
+- Always put workouts (gym, climbing, runs, PT) on the Exercise calendar, even when they are social.
+- Never schedule anything before 9am on weekdays except appointments I tell you about explicitly.
+- When you schedule a gym session, include a 10-minute ankle warm-up at the start and mention it in the event description.
+- Draft emails to faculty formally and sign them "Best, A."; emails to friends can be casual.
+- Always search both email accounts before saying something isn't there.
+- Thursday evenings are protected for Arabic tutoring; don't schedule anything that overlaps or crowds it.
+- Keep at least one weekday evening per week completely free.
+- Don't put more than two social events on the same day.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Signal Bot — Two-way secretary via Signal.
-Uses signal-cli native binary directly — no container needed.
+Uses the signal-cli-rest-api container over HTTP (see notifier.py).
 
 Run as a background service:
     export ANTHROPIC_API_KEY="sk-ant-..."
@@ -11,44 +11,23 @@ Run as a background service:
 import json
 import logging
 import os
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
 import anthropic
 
-from prompt import SIGNAL_SYSTEM_PROMPT as SYSTEM_PROMPT, FACT_EXTRACTION_PROMPT
-
+from core import respond, CALENDAR_AVAILABLE, EMAIL_AVAILABLE
 from memory import Memory
 from notifier import load_config, check_signal_cli, send_message, receive_messages
-from tools import chat_with_tools
-from diary import (
-    store_entry, get_today_entries, get_recent_entries,
-    format_entries_for_context,
-)
+from liveness import announce_up
+from diary import store_entry
 
 try:
     from paths import CONFIG_PATH
 except ImportError:
     CONFIG_PATH = Path(__file__).parent.parent / "credentials" / "config.json"
-
-# Import integrations gracefully
-try:
-    from calendar_integration import (
-        get_today_events, get_upcoming_events, get_current_event,
-        format_events_for_context,
-    )
-    CALENDAR_AVAILABLE = True
-except Exception:
-    CALENDAR_AVAILABLE = False
-
-try:
-    from email_integration import (
-        get_unread_count, get_important_unread, format_emails_for_context,
-    )
-    EMAIL_AVAILABLE = True
-except Exception:
-    EMAIL_AVAILABLE = False
 
 
 logging.basicConfig(
@@ -78,55 +57,150 @@ def get_client() -> anthropic.Anthropic:
 
 
 # ---------------------------------------------------------------------------
-# Context gathering
-# ---------------------------------------------------------------------------
-def gather_context(memory: Memory) -> str:
-    parts = []
-    now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
-    parts.append(f"Current time: {now}")
-
-    if CALENDAR_AVAILABLE:
-        try:
-            today = get_today_events()
-            if today:
-                parts.append("TODAY'S CALENDAR:\n" + format_events_for_context(today))
-            upcoming = get_upcoming_events(hours_ahead=4)
-            if upcoming:
-                parts.append("NEXT 4 HOURS:\n" + format_events_for_context(upcoming))
-            current = get_current_event()
-            if current:
-                parts.append(f"CURRENTLY IN: {current['summary']}")
-        except Exception:
-            pass
-
-    if EMAIL_AVAILABLE:
-        try:
-            counts = get_unread_count()
-            unread_str = ", ".join(f"{l}: {n}" for l, n in counts.items())
-            parts.append(f"UNREAD EMAILS: {unread_str}")
-            important = get_important_unread(max_results=3)
-            if important:
-                parts.append("IMPORTANT UNREAD:\n" + format_emails_for_context(important))
-        except Exception:
-            pass
-
-    today_diary = get_today_entries()
-    if today_diary:
-        parts.append("TODAY'S DIARY:\n" + format_entries_for_context(today_diary))
-
-    facts = memory.retrieve_facts("goals tasks deadlines schedule", top_k=10)
-    if facts:
-        parts.append("KNOWN FACTS & GOALS:\n" + "\n".join(f"- {f}" for f in facts))
-
-    return "\n\n".join(parts)
-
-
-# ---------------------------------------------------------------------------
 # Message processing
 # ---------------------------------------------------------------------------
+# Context, prompt, memory and history all come from core.respond — the same
+# backend the REPL uses. This file only owns the Signal transport and the
+# one-line tool summaries shown on the phone.
 
-signal_conversation: list[dict] = []
-MAX_SIGNAL_HISTORY = 10
+# What identifies each tool call to a human reading it on their phone. Values are
+# field names looked up in the call's input first, then in its JSON result, so
+# id-only calls (delete_calendar_event, complete_task) can still name the thing
+# they acted on — the dispatch in tools.py puts the title in the result for those.
+_TOOL_SUMMARY_FIELDS = {
+    # calendar
+    "create_calendar_event":  ["summary", "start_time"],
+    "create_allday_event":    ["summary", "date"],
+    "quick_add_event":        ["text"],
+    "update_calendar_event":  ["summary", "start_time"],
+    "delete_calendar_event":  ["summary", "start"],
+    "move_event":             ["summary", "dest_calendar"],
+    "create_calendar":        ["name"],
+    "delete_calendar":        ["name", "calendar_name"],
+    "get_calendar_range":     ["start_date", "end_date"],
+    "list_calendars":         [],
+    # email
+    "send_email":             ["to", "subject"],
+    "draft_email":            ["to", "subject"],
+    "send_draft":             ["subject", "draft_id"],
+    "search_emails":          ["query"],
+    "read_full_email":        ["subject", "from"],
+    "read_thread":            ["subject"],
+    "get_recent_emails":      [],
+    "star_email":             ["subject"],
+    "archive_email":          ["subject"],
+    "mark_email_read":        ["subject"],
+    "trash_email":            ["subject"],
+    "list_drafts":            [],
+    "return_email_labels":    [],
+    "create_email_label":     ["name"],
+    # tasks
+    "create_task":            ["title", "task_list"],
+    "update_task":            ["title", "task"],
+    "complete_task":          ["task"],
+    "reopen_task":            ["task"],
+    "delete_task":            ["task"],
+    "move_task":              ["task", "task_list"],
+    "list_tasks":             ["task_list", "filter"],
+    "list_task_lists":        [],
+    "create_task_list":       ["name"],
+    "return_task_labels":     [],
+    "list_completed_tasks":   ["since", "until"],
+    # diary, notes, misc
+    "store_diary_entry":      ["entry_type"],
+    "save_note":              ["filename"],
+    "read_note":              ["filename"],
+    "list_notes":             [],
+    "remember_rule":          ["rule"],
+    "save_fact":              ["fact"],
+    "add_goal":               ["title", "target"],
+    "list_goals":             ["status"],
+    "update_goal":            ["title", "status"],
+    "log_goal_progress":      ["goal", "note"],
+    "add_meal":               ["main", "week"],
+    "get_meal_plan":          ["week"],
+    "update_meal":            ["main", "week"],
+    "remove_meal":            ["removed"],
+    "update_meal_settings":   ["reminder_day", "temporary_diet"],
+    "log_bad_day":            ["date", "logged"],
+    "check_rest_need":        [],
+    "check_history":          ["query"],
+    "schedule_reminder":      ["when", "instruction"],
+    "list_reminders":         [],
+}
+
+# Never worth showing: opaque handles and routing details.
+_NOISE_FIELDS = {
+    "_importance", "account", "calendar_id", "event_id", "task_id", "message_id",
+    "thread_id", "draft_id", "parent_id", "id", "source_calendar", "source_calendar_id",
+    "dest_calendar_id", "success", "denied", "link", "description", "notes", "body",
+}
+
+_MAX_FIELD_LEN = 40
+
+
+def _pretty_value(value) -> str:
+    """Render one field: humanize datetimes, shorten anything long."""
+    if value is None or value == "":
+        return ""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, (list, tuple)):
+        return ", ".join(_pretty_value(v) for v in value if v) [:_MAX_FIELD_LEN]
+    text = str(value).strip()
+
+    # ISO datetime -> "Sep 8 11:15 PM"; ISO date -> "Sep 8"
+    iso = text.replace("Z", "+00:00")
+    for parse, fmt in ((datetime.fromisoformat, "%b %-d %-I:%M %p"),):
+        try:
+            dt = parse(iso)
+            return dt.strftime("%b %-d") if len(text) <= 10 else dt.strftime(fmt)
+        except (ValueError, TypeError):
+            pass
+
+    text = " ".join(text.split())
+    if len(text) > _MAX_FIELD_LEN:
+        text = text[:_MAX_FIELD_LEN - 1].rstrip() + "…"
+    return text
+
+
+def _format_tool_event(name: str, inp: dict, result: str) -> str:
+    """One terse line per tool call: `tool(what, when)`.
+
+    Shows the thing acted on rather than the arguments used to find it — an
+    event title and time, not an event id.
+    """
+    try:
+        parsed = json.loads(result)
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    if not isinstance(parsed, dict):
+        parsed = {}
+
+    failed = parsed.get("success") is False or "error" in parsed or parsed.get("denied")
+    status = "✗" if failed else "✓"
+
+    fields = _TOOL_SUMMARY_FIELDS.get(name)
+    if fields is None:
+        # Unknown tool: show its least-noisy inputs rather than nothing.
+        fields = [k for k in inp
+                  if k not in _NOISE_FIELDS and not k.endswith("_id")][:2]
+
+    parts = []
+    for key in fields:
+        raw = inp.get(key)
+        if raw in (None, ""):
+            raw = parsed.get(key)
+        rendered = _pretty_value(raw)
+        if rendered:
+            parts.append(rendered)
+
+    if not parts and failed:
+        reason = parsed.get("error") or ("denied" if parsed.get("denied") else "")
+        if reason:
+            parts = [_pretty_value(reason)]
+
+    return f"{status} {name}({', '.join(parts)})"
 
 
 def process_message(
@@ -135,56 +209,30 @@ def process_message(
     message: str,
     config: dict,
 ) -> str:
-    model = config.get("anthropic_model", "claude-sonnet-4-6")
-
     lower = message.strip().lower()
 
-    # BOD/EOD shortcuts
+    # BOD/EOD shortcuts also land in the diary; the message itself still goes
+    # through the normal turn below.
     if lower.startswith("bod:") or lower.startswith("morning plan:"):
-        content = message.split(":", 1)[1].strip()
-        store_entry("bod", content)
-        memory.store("user", f"[Morning Plan via Signal] {content}")
-
+        store_entry("bod", message.split(":", 1)[1].strip())
     elif lower.startswith("eod:") or lower.startswith("evening:"):
-        content = message.split(":", 1)[1].strip()
-        store_entry("eod", content)
-        memory.store("user", f"[Evening Reflection via Signal] {content}")
+        store_entry("eod", message.split(":", 1)[1].strip())
 
-    context = gather_context(memory)
-    system = SYSTEM_PROMPT.format(context=context)
-
-    relevant = memory.retrieve_relevant(message, top_k=5)
-    if relevant:
-        memory_lines = []
-        for msg in relevant:
-            ts = datetime.fromtimestamp(msg["timestamp"]).strftime("%b %d %I:%M %p")
-            memory_lines.append(f"[{ts}] {msg['role']}: {msg['content'][:200]}")
-        system += "\n\nRELEVANT PAST CONVERSATIONS:\n" + "\n".join(memory_lines)
-
-    messages = list(signal_conversation[-MAX_SIGNAL_HISTORY:])
-    messages.append({"role": "user", "content": message})
-
+    tool_events: list[str] = []
     try:
-        reply, _, _ = chat_with_tools(
-            client, model, system, messages,
-            max_tokens=,
+        reply, _, _ = respond(
+            client, memory, message, surface="signal", config=config,
+            tool_event_callback=lambda name, inp, result: tool_events.append(
+                _format_tool_event(name, inp, result)
+            ),
         )
-        reply = reply.strip()
-        if not reply:
-            reply = "(action completed)"
+        reply = reply or "(action completed)"
     except Exception as e:
         logger.error(f"Claude API error: {e}")
         reply = "Sorry, I hit an error processing that. Try again in a moment."
 
-    memory.store("user", f"[Signal] {message}")
-    memory.store("assistant", f"[Signal] {reply}")
-
-    signal_conversation.append({"role": "user", "content": message})
-    signal_conversation.append({"role": "assistant", "content": reply})
-
-    while len(signal_conversation) > MAX_SIGNAL_HISTORY * 2:
-        signal_conversation.pop(0)
-
+    if tool_events:
+        return "\n".join(tool_events) + "\n\n" + reply
     return reply
 
 
@@ -198,17 +246,18 @@ def run_bot():
     client = get_client()
 
     sender = config.get("sender_number", "")
-    allowed = config.get("recipient_number", "")
+    allowed_raw = config.get("recipient_number", "")
+    allowed = [allowed_raw] if isinstance(allowed_raw, str) else list(allowed_raw or [])
 
     if not sender:
         logger.error("Set sender_number in config.json")
-        return
+        sys.exit(1)
 
     # Verify signal-cli
     status = check_signal_cli(config)
     if not status["ok"]:
         logger.error(f"signal-cli not available: {status['error']}")
-        return
+        sys.exit(1)
     logger.info(f"signal-cli: {status['version']}")
 
     # Verify Claude API
@@ -221,13 +270,27 @@ def run_bot():
         logger.info(f"Claude API: connected ({model})")
     except Exception as e:
         logger.error(f"Claude API error: {e}")
-        return
+        sys.exit(1)
 
     logger.info("Signal Bot started")
     logger.info(f"  Listening as: {sender}")
-    logger.info(f"  Responding to: {allowed or 'anyone'}")
+    logger.info(f"  Responding to: {', '.join(allowed) if allowed else 'anyone'}")
     logger.info(f"  Calendar: {'yes' if CALENDAR_AVAILABLE else 'no'}")
     logger.info(f"  Email: {'yes' if EMAIL_AVAILABLE else 'no'}")
+
+    # Drop facts past their hard expiry. Cheap, and running it at startup means
+    # it happens on every restart without needing its own timer.
+    try:
+        expired = memory.purge_expired_facts()
+        if expired:
+            logger.info(f"Purged {len(expired)} expired fact(s) from memory")
+    except Exception as e:
+        logger.error(f"Fact purge failed: {e}")
+
+    try:
+        announce_up("Signal bot", detail=f"model {model} · calendar {'ok' if CALENDAR_AVAILABLE else 'off'} · email {'ok' if EMAIL_AVAILABLE else 'off'}")
+    except Exception as e:
+        logger.error(f"Startup notification failed: {e}")
 
     processed_timestamps = set()
 
@@ -244,7 +307,7 @@ def run_bot():
                     continue
                 processed_timestamps.add(ts)
 
-                if allowed and source != allowed:
+                if allowed and source not in allowed:
                     logger.info(f"Ignoring message from {source}")
                     continue
 
