@@ -4,6 +4,9 @@
 
 set -e
 
+# Always work from the project root, wherever this was launched from.
+cd "$(dirname "$0")/.."
+
 echo "========================================="
 echo "  Local Private Secretary — Setup"
 echo "========================================="
@@ -92,14 +95,32 @@ pip install -q -r requirements.txt
 echo "[✓] Python dependencies installed"
 
 echo ""
+
+# -----------------------------------------------
+# 6. Credentials & config (interactive)
+# -----------------------------------------------
+# Writes credentials/config.json, credentials.json, token_<label>.json,
+# tool_config.json and notes/savvy_rules.md. Safe to re-run on its own:
+#   python3 setup/configure.py
+python setup/configure.py
+
+echo ""
 echo "========================================="
 echo "  Setup complete!"
 echo "========================================="
 echo ""
-echo "To run the secretary:"
-echo "  source .venv/bin/activate"
-echo "  python secretary.py"
+echo "Savvy runs from the system tray: it starts on login, and you can open it"
+echo "any time from your app launcher (\"Savvy\")."
+echo "Terminal REPL instead:          ./setup/launch.sh"
+echo "To change any settings later:  python3 setup/configure.py"
 echo ""
-echo "Your data will be stored in: secretary_memory.db"
-echo "Nothing is sent to any external server."
-echo ""
+
+# -----------------------------------------------
+# 7. Start the tray app (detached, so closing this terminal doesn't stop it)
+# -----------------------------------------------
+read -r -p "Start Savvy in the system tray now? [Y/n] " ans
+if [[ ! "$ans" =~ ^[Nn] ]]; then
+    nohup .venv/bin/python src/desktop.py > /dev/null 2>&1 &
+    disown
+    echo "[✓] Savvy is starting — look for its icon in the system tray."
+fi

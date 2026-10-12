@@ -4,12 +4,25 @@
 # Ollama, Signal bot, and Scheduler run in the background.
 # Only the Secretary REPL opens a window.
 
-DIR="$HOME/Projects/secretary"
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$DIR/src"
 ACT="source $DIR/.venv/bin/activate"
 export PATH="$HOME/.local/bin:$PATH"
 LOGDIR="$DIR/logs"
 mkdir -p "$LOGDIR"
+
+# The tray app (src/desktop.py) supervises the bot and scheduler itself;
+# starting a second set here would mean two bots answering every message.
+if pgrep -f "^[^ ]*python[0-9.]* [^ ]*desktop\.py" > /dev/null; then
+    echo "[✓] Savvy desktop is running and managing the background services."
+    echo "Opening Secretary..."
+    cd "$SRC" && $ACT && python secretary.py
+    exit
+fi
+
+# A previous launch's bot/scheduler would keep running alongside the new
+# ones — two bots polling the same account, and duplicate notifications.
+"$DIR/setup/stop.sh" > /dev/null
 
 echo "Starting background services..."
 
