@@ -23,7 +23,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from paths import CREDENTIALS_DIR, MEMORY_DIR
+from paths import dfmt, CREDENTIALS_DIR, MEMORY_DIR
 
 CONFIG_PATH = CREDENTIALS_DIR / "tool_config.json"
 AUDIT_LOG = MEMORY_DIR / "tool_audit.jsonl"
@@ -33,6 +33,17 @@ DEFAULT_DANGER = 2  # Fail-safe for tools not in the config file.
 # Internal mutable state. Reloadable from disk via reload_config().
 _danger_levels: dict[str, int] = {}
 _session_allowlist: set[str] = set()
+
+# Who answers "Execute?" for a gated call. None = the terminal prompt. A GUI
+# installs its own with set_prompt_handler(); it is called from the thread
+# running the tool loop and must block until the user decides.
+_prompt_handler = None
+
+
+def set_prompt_handler(handler) -> None:
+    """handler(name, inp, call_id, level) -> 'approve' | 'deny' | 'always'."""
+    global _prompt_handler
+    _prompt_handler = handler
 
 
 # ANSI colors
@@ -239,7 +250,7 @@ def review_tool_call(name: str, inp: dict) -> tuple[str, bool]:
 
     # Otherwise: show the full call and prompt the human
     _print_full(name, inp, call_id, level)
-    decision = _prompt(name, inp, call_id, level)
+    decision = (_prompt_handler or _prompt)(name, inp, call_id, level)
     _audit_write({"call_id": call_id, "phase": "decision",
                   "tool": name, "decision": decision})
 
@@ -262,9 +273,9 @@ def _when(iso, date_only: bool = False) -> str:
     except ValueError:
         return str(iso)
     if len(str(iso)) <= 10 or date_only:
-        return dt.strftime("%a %b %-d")
+        return dt.strftime(dfmt("%a %b %-d"))
     dt = _local(dt)
-    return f"{dt.strftime('%a %b %-d')}, {dt.strftime('%-I:%M %p').lower()}"
+    return f"{dt.strftime(dfmt('%a %b %-d'))}, {dt.strftime(dfmt('%-I:%M %p')).lower()}"
 
 
 def _local(dt: datetime) -> datetime:
@@ -287,7 +298,7 @@ def _event_line(ev: dict) -> str:
     when = _when(ev.get("start"), date_only=bool(ev.get("is_allday")))
     if ev.get("end") and not ev.get("is_allday"):
         try:
-            when += "–" + _local(datetime.fromisoformat(str(ev["end"]))).strftime("%-I:%M %p").lower()
+            when += "–" + _local(datetime.fromisoformat(str(ev["end"]))).strftime(dfmt("%-I:%M %p")).lower()
         except ValueError:
             pass
     cal = f"  ({ev['calendar']})" if ev.get("calendar") else ""
