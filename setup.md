@@ -6,7 +6,8 @@ If you hit issues, the [Troubleshooting](#troubleshooting) section at the bottom
 
 ## Prerequisites
 
-- Linux or macOS (developed on Fedora-derived SecureBlue; the Signal flow assumes Podman is available, which it is by default on Fedora Kinoite / SecureBlue)
+- Linux, macOS, or Windows 10/11 (see [Windows](#windows) for the PowerShell equivalents of each command)
+- For Signal: Podman or Docker (the setup script offers to install Podman if you have neither)
 - Python 3.11+
 - An Anthropic API key — get one at [console.anthropic.com](https://console.anthropic.com/)
 - A Google account (for Calendar/Gmail/Tasks integration — optional but most of the value lives here)
@@ -34,10 +35,11 @@ secretary/
 │   ├── signal.log
 │   └── scheduler.log
 ├── setup/
-│   ├── setup.sh               # One-shot installer
-│   ├── setup-signal.sh        # Signal container setup
-│   ├── launch.sh              # Start everything
-│   └── stop.sh                # Stop background services
+│   ├── setup.sh / setup.ps1   # One-shot installer (Linux+macOS / Windows)
+│   ├── configure.py           # Credentials wizard (run by setup)
+│   ├── setup-signal.py        # Signal container setup
+│   ├── launch.sh / launch.ps1 # Start everything
+│   └── stop.sh / stop.ps1     # Stop background services
 ├── src/
 │   ├── secretary.py           # Entry point
 │   ├── prompt.py              # System prompts — edit this to personalize
@@ -59,6 +61,8 @@ chmod +x setup/setup.sh
 ./setup/setup.sh
 ```
 
+On Windows, run `powershell -ExecutionPolicy Bypass -File setup\setup.ps1` instead (see [Windows](#windows)).
+
 This will:
 
 - Install Ollama if missing
@@ -66,8 +70,9 @@ This will:
 - Check for an NVIDIA GPU (warns but does not block if absent)
 - Pull `mistral:7b-instruct-v0.3-q4_K_M` and `nomic-embed-text` models
 - Create a Python virtual environment and install `requirements.txt`
+- Run the configuration wizard (`setup/configure.py`), which prompts for everything in `credentials/` — Anthropic key, Google OAuth client and account sign-ins, Signal numbers, scheduler times, Todoist/travel keys, tool confirmation levels — and a few starter rules. Every section can be skipped.
 
-> **Heads up: hardcoded path.** `launch.sh` assumes the project lives at `$HOME/Documents/Projects/secretary`. If you cloned it elsewhere, edit the `DIR=` line at the top of `launch.sh`.
+To change settings later, re-run just the wizard: `python3 setup/configure.py`. It shows your current values as defaults, so you only retype what changes. Sections 2–5 below explain what each setting does and how to do it by hand if you prefer.
 
 ## 2. Anthropic API Key
 
@@ -176,55 +181,77 @@ You should see today's events and recent emails. If you don't, jump to Troublesh
 
 ## 4. Signal Bot (Optional)
 
-The Signal bot uses a **signal-cli-rest-api Podman container**, not signal-cli directly. This makes it easy to run on immutable distros like SecureBlue / Fedora Kinoite where Podman is preinstalled.
+The Signal bot uses the **signal-cli-rest-api container**, not signal-cli directly, so nothing needs installing beyond a container runtime. The script uses Podman if present, otherwise Docker, and works on immutable distros like SecureBlue / Fedora Kinoite as well as regular ones like Ubuntu/Kubuntu.
 
 ### 4a. Run the Signal setup script
 
+The configuration wizard runs this for you. To run it by hand:
+
 ```bash
-chmod +x setup/setup-signal.sh
-./setup/setup-signal.sh
+python3 setup/setup-signal.py
 ```
 
 This will:
 
-- Confirm Podman is available
-- Pull and start the `bbernhard/signal-cli-rest-api` container on port 8080
+- Find Podman or Docker (offering to install Podman via apt/dnf/pacman/zypper, Homebrew, or winget if neither is present; on macOS/Windows it also creates and starts the Podman VM)
+- Pull and start the `bbernhard/signal-cli-rest-api` container on `localhost:8080` (bound to localhost only, so other machines on your network can't send messages as you)
 - Print instructions for linking it to your Signal account
 
-### 4b. Link to your Signal account
+### 4b. Give Savvy a Signal identity
 
-After the container is running, the script will tell you to:
+The configuration wizard (`setup/configure.py`) does this step for you and asks which of two setups you want:
 
-1. Open `http://localhost:8080/v1/qrcodelink?device_name=secretary` in a browser
+**Option 1 — its own number (recommended).** Savvy gets a separate Signal account and shows up as its own contact you chat with. You need a second number that can receive an SMS or voice call (spare SIM, Google Voice, a landline). Don't use the number your phone's Signal already uses: registering it in the container logs your phone out.
+
+By hand:
+
+```bash
+# 1. Solve https://signalcaptchas.org/registration/generate.html, right-click
+#    "Open Signal" → copy link, and drop the signalcaptcha:// prefix
+curl -X POST -H 'Content-Type: application/json' \
+     -d '{"captcha": "<token>"}' http://localhost:8080/v1/register/+15559990000
+# 2. Enter the SMS code (add '{"use_voice": true}' to step 1 for a call instead,
+#    after an SMS attempt and a ~60s wait)
+curl -X POST -H 'Content-Type: application/json' -d '{}' \
+     http://localhost:8080/v1/register/+15559990000/verify/123456
+# 3. Optional display name
+curl -X PUT -H 'Content-Type: application/json' -d '{"name": "Savvy"}' \
+     http://localhost:8080/v1/profiles/+15559990000
+```
+
+Then text the new number from your phone once so the chat exists.
+
+**Option 2 — link to your own account.** The container joins your account as a linked device (like Signal Desktop), and you talk to Savvy in **Note to Self**. No second number needed:
+
+1. Open `http://localhost:8080/v1/qrcodelink?device_name=savvy` in a browser
 2. On your phone: Signal → Settings → Linked Devices → Link New Device
 3. Scan the QR code
 
-Once linked, get your phone number from:
-
-```bash
-curl -s http://localhost:8080/v1/accounts
-```
-
 ### 4c. Configure phone numbers
 
-Add to `credentials/config.json`:
+The wizard writes these to `credentials/config.json`:
 
 ```json
 {
   "signal_api_url": "http://localhost:8080",
-  "sender_number": "+15551234567",
+  "sender_number": "+15559990000",
   "recipient_number": "+15551234567"
 }
 ```
 
-- `sender_number` is the Signal-linked number from the previous step
-- `recipient_number` is the only number Savvy will respond to. **Set this**. Without it, anyone who knows your linked Signal number could text the bot
+- `sender_number` is the account Savvy sends from: the bot's own number (option 1) or your number (option 2)
+- `recipient_number` is the only number Savvy will respond to: your personal number. **Set this.** Without it, anyone who knows the bot's number could text it. It can also be a list of numbers
 
-For most personal setups, both numbers are the same — you're texting yourself.
+With option 2, both numbers are the same.
 
 ### 4d. Optional: auto-start the container on login
 
+**Docker:** nothing to do — the container is created with `--restart unless-stopped`.
+
+**Podman:**
+
 ```bash
+mkdir -p ~/.config/systemd/user
 podman generate systemd --name signal-api --new \
     > ~/.config/systemd/user/container-signal-api.service
 systemctl --user daemon-reload
@@ -268,7 +295,28 @@ If you'd rather just have `launch.sh` start it as a regular background process, 
 
 ## 6. Running Savvy
 
-Once everything above is set up, the normal day-to-day is just:
+### Desktop app (recommended)
+
+Savvy lives in the system tray, like Discord. `setup.sh` offers to start it at the end; after that it starts on login, and you can open it from your app launcher ("Savvy") or with:
+
+```bash
+.venv/bin/python src/desktop.py
+```
+
+The tray app:
+
+- **Runs the Signal bot and scheduler** for you and restarts them if they crash (you get a desktop notification when that happens). It also starts Ollama if it's installed but not running.
+- **Shows health in the icon:** green = all good, yellow = running but Ollama is off (memory search falls back to recent messages), red = something Savvy needs is down, grey = paused. Hover for a summary; the menu lists each part.
+- **Opens a chat window** when you click the icon. It's the same Savvy as the terminal and Signal, with the same memory, and shows recent messages from both. Tools that need confirmation pop up an Approve / Deny / Always-allow dialog.
+- **Menu:** pause/start or restart services, open the logs folder, toggle **Start on login**, quit.
+
+Closing the chat window just hides it; **Quit Savvy** in the tray menu stops everything. Launching it a second time opens the window of the copy that's already running.
+
+The terminal REPL still works alongside it: `./setup/launch.sh` notices the tray app and only opens the REPL, leaving the services to it.
+
+### Terminal only
+
+Without the desktop app:
 
 ```bash
 ./setup/launch.sh
@@ -338,15 +386,34 @@ but be sure to check it afterward in case it hallucinates actually calling the t
 
 The system prompt and any rules surfaced into context go to the Anthropic API on every turn. So anything you put in there — health conditions, fitness goals, work details — will be sent. This is fine if you're comfortable with Anthropic's data handling (30-day retention, no training), but if you have especially sensitive information, consider keeping it in the local fact store instead. The fact extractor will pull facts from conversation into a local DB, and only the relevant ones get retrieved into context per turn. That gives you finer control over what gets transmitted.
 
+## Windows
+
+Everything works on Windows 10/11, including the tray app (section 6). The optional systemd pieces (the scheduler service in 5b, Signal autostart in 4d) are Linux-only; the tray app covers the same ground. Use these instead of the shell commands in this guide:
+
+| Linux / macOS | Windows (PowerShell) |
+|---|---|
+| `./setup/setup.sh` | `powershell -ExecutionPolicy Bypass -File setup\setup.ps1` |
+| `.venv/bin/python src/desktop.py` | Start Menu → **Savvy** (added by `setup.ps1`) |
+| `./setup/launch.sh` | `powershell -ExecutionPolicy Bypass -File setup\launch.ps1` |
+| `./setup/stop.sh` | `powershell -ExecutionPolicy Bypass -File setup\stop.ps1` |
+| `source .venv/bin/activate` | `.venv\Scripts\Activate.ps1` |
+| `python3 setup/configure.py` | `.venv\Scripts\python setup\configure.py` |
+| `tail -f logs/signal.log` | `Get-Content -Wait logs\signal.err.log` |
+| `pgrep -af scheduler.py` | `Get-CimInstance Win32_Process -Filter "Name LIKE 'python%'" \| Select CommandLine` |
+
+Notes:
+
+- **Prerequisites.** `setup.ps1` installs Ollama with `winget` if it's missing. It needs Python 3.11+ already installed (`winget install -e --id Python.Python.3.12`, then open a new PowerShell window).
+- **Signal.** The easiest route is Podman: `setup-signal.py` installs it with `winget` and creates its Linux VM, which needs WSL2 (`wsl --install` as admin, then reboot). Docker Desktop works too if you already have it. After a reboot, run `podman machine start; podman start signal-api` (Docker Desktop restarts the container itself).
+- **Logs.** On Windows, background services write stdout to `logs\<name>.log` and stderr (where Python logging goes) to `logs\<name>.err.log`.
+- **Running Python by hand.** Set `$env:PYTHONUTF8 = "1"` first, or files with emoji and other non-ASCII text fail to read. The `.ps1` scripts set it for you.
+- **Start on login.** The tray app adds itself to your login items (HKCU Run key) on first launch; turn it off with **Start on login** in its menu.
+
 ## Troubleshooting
 
 ### `ModuleNotFoundError` on a fresh setup
 
 Make sure the venv is activated and you've run `pip install -r requirements.txt` inside it.
-
-### `launch.sh` fails immediately
-
-Most common cause: the hardcoded `DIR=` path at the top of `launch.sh` doesn't match where you cloned the project. Edit it to match.
 
 ### Savvy is using the wrong API key
 
@@ -382,7 +449,7 @@ Fixed in current versions, but if you hit it: the input handler uses `select` to
 
 Check in order:
 
-1. The container is running: `podman ps | grep signal-api`
+1. The container is running: `podman ps | grep signal-api` (or `docker ps`)
 2. The API responds: `curl http://localhost:8080/v1/about`
 3. The bot is actually receiving messages: `tail -f logs/signal.log` and look for `In: ...` lines
 4. `recipient_number` matches the number you're texting *from*, with country code (`+1...`)
