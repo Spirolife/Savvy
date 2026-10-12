@@ -77,7 +77,7 @@ try:
 except Exception as e:
 	print(f"[tools] Email: {e}")
 
-from paths import NOTES_DIR, add_savvy_rule
+from paths import dfmt, NOTES_DIR, add_savvy_rule
 
 TRAVEL_AVAILABLE = False
 try:
@@ -552,8 +552,8 @@ def _execute_tool_inner(name: str, inp: dict) -> str:
 		if not ev:
 			return _dumps({"success": False, "error": "Calendar rejected the travel event."})
 		return _dumps({"success": True, "summary": ev.get("summary"),
-					   "leave_at": depart.strftime("%-I:%M %p"),
-					   "arrive_by": arrive.strftime("%-I:%M %p"),
+					   "leave_at": depart.strftime(dfmt("%-I:%M %p")),
+					   "arrive_by": arrive.strftime(dfmt("%-I:%M %p")),
 					   "minutes_blocked": seconds // 60,
 					   "travel_minutes": est["minutes"], "mode": est["mode"],
 					   "source": est["source"], "calendar": ev.get("calendar_id")})

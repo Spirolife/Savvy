@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 from googleapiclient.discovery import build
 
 from google_auth import get_all_credentials, get_account_labels, stored_account_email
+from paths import dfmt
 
 try:
     from paths import CONFIG_PATH
@@ -714,11 +715,11 @@ def format_events_for_context(events: list[dict]) -> str:
                 time_str = f"{start:%a %b %d}–{last_day:%a %b %d} (all-day)"
         else:
             local = start.astimezone(tz)
-            time_str = local.strftime("%a %b %d %-I:%M %p")
+            time_str = local.strftime(dfmt("%a %b %d %-I:%M %p"))
             if e.get("end"):
                 end = e["end"].astimezone(tz)
-                time_str += "–" + (end.strftime("%-I:%M %p") if end.date() == local.date()
-                                   else end.strftime("%a %-I:%M %p"))
+                time_str += "–" + (end.strftime(dfmt("%-I:%M %p")) if end.date() == local.date()
+                                   else end.strftime(dfmt("%a %-I:%M %p")))
 
         line = f"- {time_str}: {e['summary']}"
         if e.get("calendar") and e["calendar"] != e.get("summary"):
@@ -751,12 +752,12 @@ def format_day_for_user(events: list[dict]) -> str:
             when = "All day"
         else:
             local = e["start"].astimezone(tz)
-            when = local.strftime("%-I:%M")
+            when = local.strftime(dfmt("%-I:%M"))
             if e.get("end"):
                 end = e["end"].astimezone(tz)
                 if local.strftime("%p") != end.strftime("%p"):
                     when += local.strftime(" %p").lower()
-                when += "–" + end.strftime("%-I:%M %p").lower()
+                when += "–" + end.strftime(dfmt("%-I:%M %p")).lower()
             else:
                 when += local.strftime(" %p").lower()
         line = f"- {when}  {e['summary']}"

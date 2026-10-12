@@ -26,7 +26,7 @@ import sqlite3
 import time
 from datetime import date, datetime, timedelta
 
-from paths import DB_PATH, MEMORY_DIR
+from paths import dfmt, DB_PATH, MEMORY_DIR
 
 SETTINGS_PATH = MEMORY_DIR / "meal_settings.json"
 KINDS = ("meal", "drink")
@@ -335,7 +335,7 @@ def format_week(week: str | None, today: date | None = None) -> str:
         return "Recipe ideas (not scheduled):\n" + ("\n".join(map(_fmt_meal, items)) if items else "(none)")
     meals = sum(1 for m in items if m["kind"] == "meal" and m["status"] != "skipped")
     drinks = sum(1 for m in items if m["kind"] == "drink" and m["status"] != "skipped")
-    head = f"Week of {datetime.strptime(ws, '%Y-%m-%d'):%b %-d}: {meals} meal(s), {drinks} drink(s)"
+    head = f"Week of {datetime.strptime(ws, '%Y-%m-%d').strftime(dfmt('%b %-d'))}: {meals} meal(s), {drinks} drink(s)"
     return head + ("\n" + "\n".join(map(_fmt_meal, items)) if items else "\n(nothing planned)")
 
 

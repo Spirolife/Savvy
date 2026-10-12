@@ -12,6 +12,7 @@ Project layout:
     └── .venv/
 """
 
+import os
 import re
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -37,6 +38,15 @@ SAVVY_RULES_PATH = NOTES_DIR / "savvy_rules.md"
 CREDENTIALS_DIR.mkdir(exist_ok=True)
 MEMORY_DIR.mkdir(exist_ok=True)
 NOTES_DIR.mkdir(exist_ok=True)
+
+
+def dfmt(fmt: str) -> str:
+    """strftime format with portable no-padding flags.
+
+    "%-d" / "%-I" (no leading zero) are glibc extensions; Windows spells them
+    "%#d" / "%#I" and raises ValueError on the dash form.
+    """
+    return fmt.replace("%-", "%#") if os.name == "nt" else fmt
 
 
 def load_savvy_rules() -> str:

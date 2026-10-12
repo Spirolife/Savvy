@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from paths import DB_PATH
+from paths import dfmt, DB_PATH
 
 
 def _get_db() -> sqlite3.Connection:
@@ -153,7 +153,7 @@ def format_entries_for_context(entries: list[dict]) -> str:
     lines = []
     for e in entries:
         date = e.get("date", "")
-        ts = datetime.fromtimestamp(e["timestamp"]).strftime("%-I:%M %p")
+        ts = datetime.fromtimestamp(e["timestamp"]).strftime(dfmt("%-I:%M %p"))
         label = {"bod": "Morning Plan", "eod": "Evening Reflection", "note": "Note",
                  "bad_day": "Bad day (logged)"}.get(
             e["type"], e["type"]

@@ -28,7 +28,7 @@ import time
 from datetime import datetime
 
 from notifier import load_config, send_message
-from paths import MEMORY_DIR
+from paths import dfmt, MEMORY_DIR, PROJECT_ROOT
 
 STATE_PATH = MEMORY_DIR / "liveness_state.json"
 DEFAULT_COOLDOWN_SECONDS = 600  # 10 min between repeats of the same alert
@@ -140,7 +140,7 @@ def announce_up(service: str, detail: str = "") -> bool:
     if not send:
         return False
 
-    now = datetime.now().strftime("%-I:%M %p")
+    now = datetime.now().strftime(dfmt("%-I:%M %p"))
     msg = f"🟢 {service} is up ({now})"
     if detail:
         msg += f"\n{detail}"
@@ -170,11 +170,17 @@ def announce_auth_needed(label: str, reason: str = "") -> bool:
     msg = (f"🟡 Google '{label}' needs you to sign in again"
            + (f" ({reason[:120]})" if reason else "")
            + f". Its calendar and email are off until then. On the computer run:\n"
-             f"cd ~/Projects/secretary && .venv/bin/python src/google_auth.py {label}")
+             f"{_reauth_command(label)}")
     if send_message(msg, config):
         _record_sent(key)
         return True
     return False
+
+
+def _reauth_command(label: str) -> str:
+    if sys.platform == "win32":
+        return f'cd "{PROJECT_ROOT}"; .venv\\Scripts\\python src\\google_auth.py {label}'
+    return f'cd "{PROJECT_ROOT}" && .venv/bin/python src/google_auth.py {label}'
 
 
 def announce_down(unit: str) -> bool:
@@ -194,7 +200,7 @@ def announce_down(unit: str) -> bool:
     if not send:
         return False
 
-    now = datetime.now().strftime("%-I:%M %p")
+    now = datetime.now().strftime(dfmt("%-I:%M %p"))
     lines = [f"🔴 {unit} FAILED ({now})",
              f"result={result} exit={status} restarts={restarts}"]
     if suppressed:

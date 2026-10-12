@@ -27,6 +27,7 @@ from rich.panel import Panel
 from rich.theme import Theme
 
 from memory import Memory
+from paths import dfmt
 from tool_diagnostics import print_fact_saved
 from core import (
     load_app_config, get_client, respond, extract_facts,
@@ -172,7 +173,7 @@ def handle_command(cmd, mem, client, model):
             console.print("[info]No diary entries. Use /bod and /eod.[/]")
         else:
             for e in entries:
-                ts = datetime.fromtimestamp(e["timestamp"]).strftime("%b %d %-I:%M %p")
+                ts = datetime.fromtimestamp(e["timestamp"]).strftime(dfmt("%b %d %-I:%M %p"))
                 label = {"bod": "Morning Plan", "eod": "Evening Reflection", "note": "Note"}.get(e["type"], e["type"])
                 color = "cyan" if e["type"] == "bod" else "magenta" if e["type"] == "eod" else "white"
                 console.print(f"[bold {color}][{ts}] {label}:[/] {e['content'][:300]}")
@@ -312,6 +313,17 @@ def run_repl():
         last_u, last_a = inp, response
         console.print()
 
+def _stdin_has_more(timeout: float = 0.05) -> bool:
+    """True if more input is already buffered — i.e. the rest of a paste."""
+    if os.name == "nt":
+        # select() only works on sockets on Windows; ask the console instead.
+        import msvcrt
+        time.sleep(timeout)
+        return msvcrt.kbhit()
+    import select
+    return bool(select.select([sys.stdin], [], [], timeout)[0])
+
+
 def get_user_input() -> str:
     """Read user input, supporting multi-line paste."""
     lines = []
@@ -321,8 +333,7 @@ def get_user_input() -> str:
     lines.append(first)
     
     # Check if more lines are waiting (pasted text)
-    import select, sys
-    while select.select([sys.stdin], [], [], 0.05)[0]:
+    while _stdin_has_more():
         line = sys.stdin.readline()
         if line:
             lines.append(line.rstrip('\n'))
@@ -344,6 +355,8 @@ def run_signal():
 # Entry
 # ===================================================================
 if __name__ == "__main__":
+    if os.name == "nt":
+        os.system("")   # turns on ANSI color handling in the Windows console
     parser = argparse.ArgumentParser(description="Savvy — Private Secretary")
     parser.add_argument("--signal", action="store_true", help="Signal bot mode")
     args = parser.parse_args()

@@ -60,7 +60,7 @@ logger = logging.getLogger("secretary.scheduler")
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-from paths import CONFIG_PATH, SCHEDULER_STATE_PATH as STATE_PATH
+from paths import dfmt, CONFIG_PATH, SCHEDULER_STATE_PATH as STATE_PATH
 
 
 def load_config() -> dict:
@@ -349,7 +349,7 @@ def meal_reminder(memory: Memory, state: dict, config: dict):
     items = [m for m in meals.get_week(week) if m["status"] != "skipped"]
     n_meals = sum(m["kind"] == "meal" for m in items)
     n_drinks = sum(m["kind"] == "drink" for m in items)
-    label = datetime.strptime(week, "%Y-%m-%d").strftime("%b %-d")
+    label = datetime.strptime(week, "%Y-%m-%d").strftime(dfmt("%b %-d"))
     if items:
         lines = [f"Meals for the week of {label}:"]
         for m in items:
