@@ -20,9 +20,10 @@ import anthropic
 
 from core import respond, CALENDAR_AVAILABLE, EMAIL_AVAILABLE
 from memory import Memory
-from notifier import load_config, check_signal_cli, send_message, receive_messages
+from notifier import load_config, check_signal_cli, send_message, receive_messages, allowed_senders
 from liveness import announce_up
 from diary import store_entry
+from paths import dfmt
 
 try:
     from paths import CONFIG_PATH
@@ -151,10 +152,10 @@ def _pretty_value(value) -> str:
 
     # ISO datetime -> "Sep 8 11:15 PM"; ISO date -> "Sep 8"
     iso = text.replace("Z", "+00:00")
-    for parse, fmt in ((datetime.fromisoformat, "%b %-d %-I:%M %p"),):
+    for parse, fmt in ((datetime.fromisoformat, dfmt("%b %-d %-I:%M %p")),):
         try:
             dt = parse(iso)
-            return dt.strftime("%b %-d") if len(text) <= 10 else dt.strftime(fmt)
+            return dt.strftime(dfmt("%b %-d")) if len(text) <= 10 else dt.strftime(fmt)
         except (ValueError, TypeError):
             pass
 
@@ -246,8 +247,7 @@ def run_bot():
     client = get_client()
 
     sender = config.get("sender_number", "")
-    allowed_raw = config.get("recipient_number", "")
-    allowed = [allowed_raw] if isinstance(allowed_raw, str) else list(allowed_raw or [])
+    allowed = allowed_senders(config)
 
     if not sender:
         logger.error("Set sender_number in config.json")
@@ -274,7 +274,7 @@ def run_bot():
 
     logger.info("Signal Bot started")
     logger.info(f"  Listening as: {sender}")
-    logger.info(f"  Responding to: {', '.join(allowed) if allowed else 'anyone'}")
+    logger.info(f"  Responding to: {', '.join(sorted(allowed)) if allowed else 'anyone'}")
     logger.info(f"  Calendar: {'yes' if CALENDAR_AVAILABLE else 'no'}")
     logger.info(f"  Email: {'yes' if EMAIL_AVAILABLE else 'no'}")
 
@@ -307,8 +307,12 @@ def run_bot():
                     continue
                 processed_timestamps.add(ts)
 
-                if allowed and source not in allowed:
-                    logger.info(f"Ignoring message from {source}")
+                if allowed and not ({source, msg.get("source_uuid", "")} & allowed):
+                    hint = ""
+                    if source == msg.get("source_uuid") or not source.startswith("+"):
+                        hint = (" (their number is hidden — if this is you, re-run the Signal"
+                                " step of setup/configure.py to pair your account)")
+                    logger.info(f"Ignoring message from {source}{hint}")
                     continue
 
                 logger.info(f"Received: {text[:100]}")

@@ -130,7 +130,7 @@ def _send_one(message: str, config: dict | None = None) -> bool:
     config = config or load_config()
     url = _get_api_url(config)
     sender = config.get("sender_number", "")
-    recipients = _as_list(config.get("recipient_number", ""))
+    recipients = send_targets(config)
 
     if not sender or not recipients:
         logger.error("Signal not configured. Set sender_number and recipient_number in config.json")
@@ -154,6 +154,21 @@ def _send_one(message: str, config: dict | None = None) -> bool:
     except Exception as e:
         logger.error(f"Failed to send Signal message: {e}")
         return False
+
+
+def send_targets(config: dict) -> list[str]:
+    """Who Savvy messages: recipient_uuid when set, else recipient_number.
+
+    A user whose Signal number is hidden ("Who can see my number: Nobody")
+    only ever appears to the bot as a UUID, and may not be reachable by
+    number at all. Sending to both would deliver every message twice.
+    """
+    return _as_list(config.get("recipient_uuid") or "") or _as_list(config.get("recipient_number", ""))
+
+
+def allowed_senders(config: dict) -> set[str]:
+    """Numbers and UUIDs the bot will answer. Empty means anyone."""
+    return set(_as_list(config.get("recipient_number") or "")) | set(_as_list(config.get("recipient_uuid") or ""))
 
 
 def send_notification(title: str, body: str, config: dict | None = None) -> bool:
@@ -192,6 +207,7 @@ def receive_messages(config: dict | None = None) -> list[dict]:
             source = envelope.get("sourceNumber") or envelope.get("source", "")
             messages.append({
                 "source": source,
+                "source_uuid": envelope.get("sourceUuid", ""),
                 "message": data_msg["message"],
                 "timestamp": data_msg.get("timestamp", 0),
             })
