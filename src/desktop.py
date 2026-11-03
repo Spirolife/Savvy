@@ -217,6 +217,33 @@ def start_ollama_if_needed() -> None:
     subprocess.Popen([exe, "serve"], stdout=log, stderr=log, stdin=subprocess.DEVNULL, **kw)
 
 
+class SigninChecker(QObject):
+    """Finds Google accounts that need signing in again, off the UI thread."""
+
+    result = Signal(dict)       # {label: sign-in link}
+
+    def __init__(self):
+        super().__init__()
+        self._busy = threading.Lock()
+
+    def check_async(self) -> None:
+        threading.Thread(target=self._check, daemon=True).start()
+
+    def _check(self) -> None:
+        if not self._busy.acquire(blocking=False):
+            return
+        try:
+            from google_auth import (get_all_credentials, signin_link, signin_needed,
+                                     start_signin_listener)
+            start_signin_listener()     # so links work even while services are paused
+            get_all_credentials()
+            self.result.emit({label: signin_link(label) for label in signin_needed()})
+        except Exception as e:
+            print(f"[desktop] Google sign-in check failed: {e}")
+        finally:
+            self._busy.release()
+
+
 class Service(QObject):
     """One supervised child process, restarted with backoff if it exits on its own."""
 
@@ -404,6 +431,11 @@ class ChatWorker(QObject):
     @Slot(str)
     def ask(self, text: str) -> None:
         try:
+            from core import finish_pasted_signin
+            signin_reply = finish_pasted_signin(text, markdown=True)
+            if signin_reply:            # holds a one-time code: not for the model or memory
+                self.done.emit(signin_reply)
+                return
             self._ensure()
             from core import respond
             reply, _, _ = respond(
@@ -469,6 +501,11 @@ class ChatWindow(QWidget):
 
         self.view = QTextBrowser()
         self.view.setOpenExternalLinks(True)
+        self.signin_banner = QLabel()
+        self.signin_banner.setWordWrap(True)
+        self.signin_banner.setOpenExternalLinks(True)
+        self.signin_banner.setTextFormat(Qt.TextFormat.RichText)
+        self.signin_banner.setVisible(False)
         self.status = QLabel("")
         self.status.setStyleSheet("color: palette(placeholder-text);")
         self.input = InputBox()
@@ -482,6 +519,7 @@ class ChatWindow(QWidget):
         row.addWidget(self.input, 1)
         row.addWidget(self.send_btn)
         lay = QVBoxLayout(self)
+        lay.addWidget(self.signin_banner)
         lay.addWidget(self.view, 1)
         lay.addWidget(self.status)
         lay.addLayout(row)
@@ -526,6 +564,14 @@ class ChatWindow(QWidget):
             self._render_timer.start()
 
     # ---- actions ----------------------------------------------------------
+    def set_signin_links(self, links: dict) -> None:
+        from html import escape
+        self.signin_banner.setText("⚠ Google needs you to sign in again: " + " · ".join(
+            f'<a href="{escape(url, quote=True)}">{escape(label)}</a>' if url
+            else f"{escape(label)} (no link: check credentials/credentials.json)"
+            for label, url in links.items()))
+        self.signin_banner.setVisible(bool(links))
+
     def send(self) -> None:
         text = self.input.toPlainText().strip()
         if not text or self.busy:
@@ -619,6 +665,8 @@ class TrayApp(QObject):
         self.paused = False
         self.health: dict = {}
         self.chat: ChatWindow | None = None
+        self.signin_links: dict = {}
+        self.signin_actions: list[QAction] = []
 
         self.services = [
             Service("Signal bot", ["secretary.py", "--signal"], "signal.log", self),
@@ -634,6 +682,7 @@ class TrayApp(QObject):
 
         self.tray = QSystemTrayIcon(status_icon("paused"), self)
         self.tray.activated.connect(self._on_activated)
+        self.tray.messageClicked.connect(self.open_chat)
         self._build_menu()
         self.tray.show()
 
@@ -641,6 +690,13 @@ class TrayApp(QObject):
         self.poll.timeout.connect(self.checker.check_async)
         self.poll.timeout.connect(self.refresh)        # keeps uptimes fresh
         self.poll.start()
+
+        self.signin_checker = SigninChecker()
+        self.signin_checker.result.connect(self._on_signin_links)
+        self.signin_poll = QTimer(self, interval=60000)  # each check calls Google
+        self.signin_poll.timeout.connect(self.signin_checker.check_async)
+        self.signin_poll.start()
+        self.signin_checker.check_async()
 
         stop_stray_services()
         start_ollama_if_needed()
@@ -656,7 +712,7 @@ class TrayApp(QObject):
         for a in self.lines.values():
             a.setEnabled(False)
         m.addSeparator()
-        m.addAction("Open chat", self.open_chat)
+        self.open_chat_action = m.addAction("Open chat", self.open_chat)
         self.toggle = m.addAction("Pause services", self.toggle_services)
         m.addAction("Restart services", self.restart_services)
         m.addAction("Open logs folder",
@@ -691,6 +747,8 @@ class TrayApp(QObject):
             return "down", "Signal container is down"
         if h and not h.get("signal_account"):
             return "down", "Signal number isn't registered in the container"
+        if self.signin_links:
+            return "degraded", "Google sign-in needed: " + ", ".join(self.signin_links)
         if h and not h.get("ollama"):
             return "degraded", "Running · Ollama off (recency-only memory)"
         return "ok", "All systems running"
@@ -712,6 +770,27 @@ class TrayApp(QObject):
         self.toggle.setText("Start services" if self.paused else "Pause services")
         self.tray.setIcon(status_icon(status))
         self.tray.setToolTip(f"Savvy — {summary}")
+
+    def _on_signin_links(self, links: dict) -> None:
+        new = set(links) - set(self.signin_links)
+        self.signin_links = links
+        for action in self.signin_actions:
+            self.menu.removeAction(action)
+        self.signin_actions = []
+        for label, url in links.items():
+            if not url:
+                continue
+            action = QAction(f"Sign in to Google: {label}", self.menu)
+            action.triggered.connect(lambda _=False, u=url: QDesktopServices.openUrl(QUrl(u)))
+            self.menu.insertAction(self.open_chat_action, action)
+            self.signin_actions.append(action)
+        if self.chat:
+            self.chat.set_signin_links(links)
+        if new:
+            self.tray.showMessage(
+                "Savvy", f"Google needs you to sign in again: {', '.join(sorted(new))}. "
+                "Click here for the link.", QSystemTrayIcon.MessageIcon.Warning, 8000)
+        self.refresh()
 
     def _on_health(self, h: dict) -> None:
         self.health = h
@@ -743,6 +822,7 @@ class TrayApp(QObject):
     def open_chat(self) -> None:
         if self.chat is None:
             self.chat = ChatWindow()
+            self.chat.set_signin_links(self.signin_links)
         self.chat.bring_up()
 
     def quit(self) -> None:

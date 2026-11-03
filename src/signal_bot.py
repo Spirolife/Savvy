@@ -18,7 +18,7 @@ from pathlib import Path
 
 import anthropic
 
-from core import respond, CALENDAR_AVAILABLE, EMAIL_AVAILABLE
+from core import respond, finish_pasted_signin, CALENDAR_AVAILABLE, EMAIL_AVAILABLE
 from memory import Memory
 from notifier import load_config, check_signal_cli, send_message, receive_messages, allowed_senders
 from liveness import announce_up
@@ -241,6 +241,13 @@ def process_message(
 # Main loop
 # ---------------------------------------------------------------------------
 def run_bot():
+    os.environ["SAVVY_UNATTENDED"] = "1"   # never wait on a browser sign-in
+    try:
+        from google_auth import start_signin_listener
+        start_signin_listener()
+    except Exception as e:
+        logger.warning(f"Google sign-in links won't finish on this computer: {e}")
+
     config = load_config()
     app_config = load_app_config()
     memory = Memory(session_id="signal_bot")
@@ -313,6 +320,13 @@ def run_bot():
                         hint = (" (their number is hidden — if this is you, re-run the Signal"
                                 " step of setup/configure.py to pair your account)")
                     logger.info(f"Ignoring message from {source}{hint}")
+                    continue
+
+                # Before logging or the model: the address holds a one-time code.
+                signin_reply = finish_pasted_signin(text)
+                if signin_reply:
+                    logger.info("Received a Google sign-in redirect")
+                    send_message(signin_reply, config)
                     continue
 
                 logger.info(f"Received: {text[:100]}")

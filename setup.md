@@ -431,6 +431,17 @@ Most common cause: the Google account you're logging in with isn't on the test u
 
 Second most common: the `credentials/credentials.json` file doesn't match the project where you enabled the APIs. Re-download from the Credentials page and replace.
 
+### Google says I need to sign in again
+
+When a login expires, Savvy sends a sign-in link over Signal, adds one to its chat replies, and shows one at the top of the chat window and in the tray menu. Links work for 7 days.
+
+- **On the computer:** click the link and approve. It finishes by itself.
+- **On a phone:** tap the link and approve. The last page won't load, because Google sends you back to a `localhost` address. Copy that page's address and send it to Savvy, on Signal or in the chat window.
+
+The link opens on the account that label belongs to. If you pick a different one, Savvy says so and saves nothing.
+
+**If this happens about once a week:** Google expires logins after 7 days while an OAuth app is in Testing. Under **Google Auth Platform → Audience** in the Cloud Console, click **Publish app**. Google will still warn that the app is unverified, but logins stop expiring on that schedule.
+
 ### `/calendar` shows the wrong account's events
 
 The token labels in `credentials/token_<label>.json` don't enforce *which* account they're attached to — that's determined by which Google account you logged into during the browser flow. List the connected accounts:

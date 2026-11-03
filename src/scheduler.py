@@ -28,7 +28,7 @@ from diary import (
 )
 from reminders import pop_due_reminders, requeue
 from tools import chat_with_tools, read_only_tools, request_options
-from core import build_context, SURFACE_TAG
+from core import build_context, with_signin_notice, SURFACE_TAG
 from prompt import SYSTEM_PROMPT, CHECKIN_INSTRUCTION
 import meals
 import rest
@@ -169,7 +169,7 @@ def autonomous_turn(client: anthropic.Anthropic, memory: Memory, instruction: st
         client, MODEL, system, messages, max_tokens=max_tokens,
         tools=read_only_tools() if read_only else None, options=options,
     )
-    return reply.strip()
+    return with_signin_notice(reply.strip())
 
 
 # ---------------------------------------------------------------------------
@@ -487,6 +487,13 @@ def run_due_reminders(client: anthropic.Anthropic, memory: Memory, state: dict, 
 # Main loop
 # ---------------------------------------------------------------------------
 def run_scheduler():
+    os.environ["SAVVY_UNATTENDED"] = "1"   # never wait on a browser sign-in
+    try:
+        from google_auth import start_signin_listener
+        start_signin_listener()
+    except Exception as e:
+        logger.warning(f"Google sign-in links won't finish on this computer: {e}")
+
     config = load_config()
     state = load_state()
     memory = Memory(session_id="scheduler")

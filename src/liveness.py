@@ -156,8 +156,12 @@ def announce_up(service: str, detail: str = "") -> bool:
 AUTH_ALERT_COOLDOWN_SECONDS = 6 * 3600  # services retry every few seconds; text at most every 6h
 
 
-def announce_auth_needed(label: str, reason: str = "") -> bool:
-    """A Google login expired while a service was running with nobody at the keyboard."""
+def announce_auth_needed(label: str, reason: str = "", how_to_fix: str = "") -> bool:
+    """A Google login expired while a service was running with nobody at the keyboard.
+
+    The caller supplies the sign-in link as `how_to_fix`, since this module has to
+    work without Google installed. Without one, it falls back to the command.
+    """
     config = load_config()
     if not _enabled(config):
         return False
@@ -169,8 +173,8 @@ def announce_auth_needed(label: str, reason: str = "") -> bool:
 
     msg = (f"🟡 Google '{label}' needs you to sign in again"
            + (f" ({reason[:120]})" if reason else "")
-           + f". Its calendar and email are off until then. On the computer run:\n"
-             f"{_reauth_command(label)}")
+           + ". Its calendar and email are off until then.\n\n"
+           + (how_to_fix or f"On the computer run:\n{_reauth_command(label)}"))
     if send_message(msg, config):
         _record_sent(key)
         return True

@@ -9,6 +9,8 @@ and its token budget.
 
 import json
 import os
+import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -115,6 +117,20 @@ def get_live_context() -> dict:
             ctx["email"] = "\n".join(parts)
         except Exception:
             pass
+
+    # The fetches above just found out whether each account still works.
+    try:
+        from google_auth import signin_needed
+        signed_out = ", ".join(signin_needed())
+    except Exception:
+        signed_out = ""
+    if signed_out:
+        ctx["calendar"] = (
+            f"GOOGLE SIGN-IN NEEDED: {signed_out}. Calendar and email for these accounts are "
+            "missing from this snapshot and from tool results, so an empty result doesn't mean "
+            "nothing is scheduled; say what you can't see. A sign-in link is added to your reply "
+            "automatically whenever you mention signing in, so never write a link or a terminal "
+            "command for it yourself.\n\n" + ctx["calendar"])
 
     today_diary = get_today_entries()
     recent_diary = get_recent_entries(days=3)
@@ -225,6 +241,47 @@ def build_context(user_input: str, memory: Memory, system_template: str = SYSTEM
 
 SURFACE_TAG = {"signal": "[Signal] "}
 
+# ---------------------------------------------------------------------------
+# Google sign-in links in replies
+# ---------------------------------------------------------------------------
+SIGNIN_NOTICE_EVERY = 3600  # seconds, for replies that don't mention signing in
+_MENTIONS_SIGNIN = re.compile(r"sign(ed|ing)?[- ]?(back )?in|log(ged|ging)?[- ]?(back )?in|re-?auth", re.I)
+_last_signin_notice: float | None = None
+
+
+def with_signin_notice(reply: str, markdown: bool = False) -> str:
+    """Add the sign-in link(s) to a reply while a Google account is signed out.
+
+    Done here rather than left to the model, which would have to copy a 500
+    character URL perfectly. Sent when the reply brings it up, and otherwise
+    hourly: a link on every message while signed out would bury the replies.
+    """
+    global _last_signin_notice
+    due = (_last_signin_notice is None
+           or time.monotonic() - _last_signin_notice >= SIGNIN_NOTICE_EVERY)
+    if not due and not _MENTIONS_SIGNIN.search(reply):
+        return reply
+    try:
+        from google_auth import signin_notice
+        notice = signin_notice(markdown)
+    except Exception as e:
+        print(f"[core] Could not add a sign-in link: {e}")
+        return reply
+    if not notice:
+        return reply
+    _last_signin_notice = time.monotonic()
+    return f"{reply}\n\n{notice}" if reply else notice
+
+
+def finish_pasted_signin(text: str, markdown: bool = False) -> str | None:
+    """The reply if `text` is a pasted Google sign-in redirect, otherwise None."""
+    try:
+        from google_auth import finish_signin_from_text
+        return finish_signin_from_text(text, markdown)
+    except Exception as e:
+        print(f"[core] Could not finish that sign-in: {e}")
+        return None
+
 
 def respond(client: anthropic.Anthropic, memory: Memory, user_input: str, surface: str = "repl",
             config: dict | None = None, stream_callback=None, tool_event_callback=None,
@@ -263,7 +320,8 @@ def respond(client: anthropic.Anthropic, memory: Memory, user_input: str, surfac
             print_fact_saved(f["fact"], f["type"], memory.store_fact(f["fact"], f["type"]))
     except Exception as e:
         print(f"[core] Fact extraction failed: {e}")
-    return reply, tokens_in, tokens_out
+    # After storing: the link goes stale, so it stays out of memory and history.
+    return with_signin_notice(reply, markdown=surface != "signal"), tokens_in, tokens_out
 
 
 # ---------------------------------------------------------------------------
