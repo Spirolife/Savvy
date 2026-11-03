@@ -30,7 +30,7 @@ from html import escape
 from pathlib import Path
 
 from PySide6.QtCore import (
-    QIODeviceBase, QObject, QProcess, QProcessEnvironment, QRectF, QSize, Qt,
+    QFileSystemWatcher, QIODeviceBase, QObject, QProcess, QProcessEnvironment, QRectF, QSize, Qt,
     QThread, QTimer, QUrl, Signal, Slot,
 )
 from PySide6.QtGui import (
@@ -44,7 +44,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from paths import MEMORY_DIR, PROJECT_ROOT
+from paths import CREDENTIALS_DIR, MEMORY_DIR, PROJECT_ROOT
 
 SRC = PROJECT_ROOT / "src"
 LOG_DIR = PROJECT_ROOT / "logs"
@@ -225,8 +225,10 @@ class SigninChecker(QObject):
     def __init__(self):
         super().__init__()
         self._busy = threading.Lock()
+        self._again = False
 
     def check_async(self) -> None:
+        self._again = True      # a check already running may have read the old login
         threading.Thread(target=self._check, daemon=True).start()
 
     def _check(self) -> None:
@@ -236,8 +238,10 @@ class SigninChecker(QObject):
             from google_auth import (get_all_credentials, signin_link, signin_needed,
                                      start_signin_listener)
             start_signin_listener()     # so links work even while services are paused
-            get_all_credentials()
-            self.result.emit({label: signin_link(label) for label in signin_needed()})
+            while self._again:
+                self._again = False
+                get_all_credentials()
+                self.result.emit({label: signin_link(label) for label in signin_needed()})
         except Exception as e:
             print(f"[desktop] Google sign-in check failed: {e}")
         finally:
@@ -697,6 +701,10 @@ class TrayApp(QObject):
         self.signin_poll.timeout.connect(self.signin_checker.check_async)
         self.signin_poll.start()
         self.signin_checker.check_async()
+        # A finished sign-in should clear the warning now, not at the next poll.
+        # Watching the folder because saving a login replaces the token file.
+        self.token_watcher = QFileSystemWatcher([str(CREDENTIALS_DIR)], self)
+        self.token_watcher.directoryChanged.connect(lambda _: self.signin_checker.check_async())
 
         stop_stray_services()
         start_ollama_if_needed()
