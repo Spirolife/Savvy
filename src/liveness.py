@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Liveness alerts — tell me over Signal when a Savvy service starts or dies.
+Liveness alerts — tell me (phone app and/or Signal, via notify.py) when a
+Savvy service starts or dies.
 
 Two entry points:
 
@@ -12,7 +13,7 @@ Two entry points:
                NOT run inside the process that died — a segfault, OOM kill, or
                hard SIGKILL leaves nothing behind to report itself.
 
-Only httpx is needed here (through notifier). This module must stay importable
+Only httpx is needed here (through notify/notifier; push imports google-auth lazily). This module must stay importable
 when anthropic, google-api-python-client, or Ollama are broken — those are
 exactly the failures it exists to report.
 
@@ -27,7 +28,8 @@ import sys
 import time
 from datetime import datetime
 
-from notifier import load_config, send_message
+from notifier import load_config
+from notify import deliver
 from paths import dfmt, MEMORY_DIR, PROJECT_ROOT
 
 STATE_PATH = MEMORY_DIR / "liveness_state.json"
@@ -147,7 +149,7 @@ def announce_up(service: str, detail: str = "") -> bool:
     if suppressed:
         msg += f"\n\n({suppressed} earlier restart(s) not sent — within cooldown)"
 
-    if send_message(msg, config):
+    if _send(msg, config, "alert", f"{service} is up"):
         _record_sent(key)
         return True
     return False
@@ -175,7 +177,7 @@ def announce_auth_needed(label: str, reason: str = "", how_to_fix: str = "") -> 
            + (f" ({reason[:120]})" if reason else "")
            + ". Its calendar and email are off until then.\n\n"
            + (how_to_fix or f"On the computer run:\n{_reauth_command(label)}"))
-    if send_message(msg, config):
+    if _send(msg, config, "signin", f"Google '{label}' needs signing in"):
         _record_sent(key)
         return True
     return False
@@ -218,10 +220,16 @@ def announce_down(unit: str) -> bool:
     if len(msg) > 1800:  # keep it readable on a phone
         msg = msg[:1800] + "\n…(truncated)"
 
-    if send_message(msg, config):
+    if _send(msg, config, "alert", f"{unit} failed"):
         _record_sent(key)
         return True
     return False
+
+
+def _send(msg: str, config: dict, kind: str, title: str) -> bool:
+    """Signal gets the message exactly as written; the app gets a title and the rest."""
+    body = msg.partition("\n")[2].strip() or msg
+    return deliver(title, body, kind, config, signal_text=msg)
 
 
 # ---------------------------------------------------------------------------
@@ -240,8 +248,8 @@ def main(argv: list[str]) -> int:
         return 0 if announce_up(target) else 1
     if command == "test":
         config = load_config()
-        ok = send_message(f"🔎 Savvy liveness test ({target})", config)
-        print("sent" if ok else "FAILED — is the signal-api container up?")
+        ok = _send(f"🔎 Savvy liveness test ({target})", config, "alert", "Savvy liveness test")
+        print("sent" if ok else "FAILED — no phone app paired and Signal didn't take it")
         return 0 if ok else 1
 
     print(f"unknown command: {command}", file=sys.stderr)

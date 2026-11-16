@@ -340,23 +340,40 @@ def complete_signin(state: str, code: str) -> tuple[bool, str]:
         print(f"[google_auth] Sign-in for '{label}' failed: {e}")
         return False, f"Google wouldn't complete the sign-in for '{label}'. Try the link once more."
 
-    # Same guard as the terminal flow: never file one account under another's label.
     creds = flow.credentials
     email = fetch_account_email(creds)
-    expected = stored_account_email(label)
-    clash = _label_owning_email(email, exclude=label) if email else ""
-    if email and expected and email.lower() != expected.lower():
-        return False, (f"That was {email}, but '{label}' is {expected}. Nothing was saved. "
-                       f"Use the link again and pick {expected}.")
-    if clash:
-        return False, f"{email} is already saved as '{clash}', so it wasn't saved as '{label}'."
+    problem, message = identity_problem(label, email)
+    if problem == "wrong_account":
+        return False, f"{message} Use the link again and pick {stored_account_email(label)}."
+    if problem:
+        return False, message
 
+    save_signin(label, creds, email)
+    return True, f"'{label}' is signed in again" + (f" as {email}." if email else ".")
+
+
+def identity_problem(label: str, email: str) -> tuple[str, str]:
+    """Why `email` mustn't be saved as `label`, as (code, message); ("", "") if it may.
+
+    Same guard as the terminal flow: never file one account under another's
+    label. Shared by link sign-ins and the phone app's native sign-in.
+    """
+    expected = stored_account_email(label)
+    if email and expected and email.lower() != expected.lower():
+        return "wrong_account", f"That was {email}, but '{label}' is {expected}. Nothing was saved."
+    clash = _label_owning_email(email, exclude=label) if email else ""
+    if clash:
+        return "label_clash", f"{email} is already saved as '{clash}', so it wasn't saved as '{label}'."
+    return "", ""
+
+
+def save_signin(label: str, creds: Credentials, email: str) -> None:
+    """Keep a login that passed identity_problem, and retire this label's old links."""
     _write_token(label, creds, email)
     _needs_signin.pop(label, None)
     for other, data in _pending_links():
         if data.get("label") == label:
             other.unlink(missing_ok=True)
-    return True, f"'{label}' is signed in again" + (f" as {email}." if email else ".")
 
 
 _PASTED_REDIRECT = re.compile(r"(?:https?://)?(?:localhost|127\.0\.0\.1)(?::\d+)?/?\?\S+")

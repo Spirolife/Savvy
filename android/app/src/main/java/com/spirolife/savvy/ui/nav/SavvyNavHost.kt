@@ -71,6 +71,7 @@ fun NavController.openTab(route: String) = navigate(route) {
 @Composable
 fun SavvyNavHost(startRoute: String, pendingRoute: String?, onPendingRouteHandled: () -> Unit) {
     val nav = rememberNavController()
+    com.spirolife.savvy.ui.pair.ReturnToPairingWhenUnpaired(nav)   // the PC dropped this phone's token
     val entry by nav.currentBackStackEntryAsState()
     val current = entry?.destination?.route
 

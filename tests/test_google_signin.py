@@ -284,9 +284,9 @@ class AlertTests(unittest.TestCase):
                 mock.patch.object(liveness, "_enabled", return_value=True), \
                 mock.patch.object(liveness, "_check_cooldown", return_value=(True, 0)), \
                 mock.patch.object(liveness, "_record_sent"), \
-                mock.patch.object(liveness, "send_message", return_value=True) as send:
+                mock.patch.object(liveness, "deliver", return_value=True) as send:
             liveness.announce_auth_needed(*args)
-        return send.call_args.args[0]
+        return send.call_args.kwargs["signal_text"]
 
     def test_alert_carries_the_link(self):
         msg = self.send("personal", "expired", "Sign in:\nhttps://accounts.google.com/x")

@@ -31,6 +31,7 @@ from tools import chat_with_tools, read_only_tools, request_options
 from core import build_context, with_signin_notice, SURFACE_TAG
 from prompt import SYSTEM_PROMPT, CHECKIN_INSTRUCTION
 import meals
+import notify
 import rest
 
 # Import integrations gracefully (may not be set up yet)
@@ -125,10 +126,11 @@ def can_notify(state: dict, config: dict) -> bool:
     return True
 
 
-def do_send(title: str, body: str, state: dict, config: dict, memory: Memory | None = None) -> bool:
+def do_send(title: str, body: str, state: dict, config: dict, memory: Memory | None = None,
+            kind: str = "checkin") -> bool:
     if not can_notify(state, config):
         return False
-    ok = send_notification(title, body, config)
+    ok = notify.deliver(title, body, kind, config)
     if ok:
         state["notifications_today"] = state.get("notifications_today", 0) + 1
         save_state(state)
@@ -203,7 +205,7 @@ def bod_prompt(state: dict, config: dict):
         "Open the secretary and type /bod to log your morning plan."
     )
 
-    do_send("Morning Check-in", message, state, config)
+    do_send("Morning Check-in", message, state, config, kind="bod")
     state["last_bod_prompt"] = today
     save_state(state)
 
@@ -234,7 +236,7 @@ def eod_prompt(state: dict, config: dict):
         "Open the secretary and type /eod to log your evening reflection."
     )
 
-    do_send("Evening Reflection", message, state, config)
+    do_send("Evening Reflection", message, state, config, kind="eod")
     state["last_eod_prompt"] = today
     save_state(state)
 
@@ -262,7 +264,7 @@ def smart_checkin(client: anthropic.Anthropic, memory: Memory, state: dict, conf
     logger.info(f"Check-in [{checkin_label}]: {response[:200]}")
 
     if response and response.strip().upper() != "NONE":
-        do_send("Check-in", response, state, config, memory)
+        do_send("Check-in", response, state, config, memory, kind="checkin")
 
     state[checkin_key] = True
     save_state(state)
@@ -324,7 +326,7 @@ Reference my actual entries and goals, not generic advice."""
         logger.error(f"Weekly review failed: {e}")
         return
     if response:
-        do_send("Weekly Review", response, state, config, memory)
+        do_send("Weekly Review", response, state, config, memory, kind="weekly")
         state[week_key] = True
         save_state(state)
 
@@ -375,7 +377,7 @@ def meal_reminder(memory: Memory, state: dict, config: dict):
         lines.append(f"(Still on {diet}.)")
 
     logger.info(f"Sending meal reminder for week of {week}")
-    if do_send("Meal plan", "\n".join(lines), state, config, memory):
+    if do_send("Meal plan", "\n".join(lines), state, config, memory, kind="meal"):
         state[key] = True
         save_state(state)
 
@@ -404,7 +406,7 @@ def fact_check(memory: Memory, state: dict, config: dict):
     lines += [f"{n}. {f['fact']} (noted {f['age']})" for n, f in enumerate(facts, 1)]
     lines.append("\nTell me which still hold and which don't. Anything you don't answer just fades over time.")
     logger.info(f"Fact check: asking about {len(facts)} fact(s)")
-    if do_send("Memory check", "\n".join(lines), state, config, memory):
+    if do_send("Memory check", "\n".join(lines), state, config, memory, kind="fact_check"):
         memory.mark_checked([f["id"] for f in facts])
 
 
@@ -423,6 +425,8 @@ nothing". Offer to block it on the calendar; don't book anything. No guilt, no l
 def rest_day_check(client: anthropic.Anthropic, memory: Memory, state: dict, config: dict):
     """Crash-out early warning: text once per trigger, at rest_days.check_time."""
     s = rest.settings(config)
+    if not s.get("enabled", True):         # "Rest-day warnings" off in the app's Settings
+        return
     if not is_within_window(s["check_time"], window_minutes=15):
         return
     today_key = f"rest_checked_{datetime.now():%Y-%m-%d}"
@@ -448,7 +452,7 @@ def rest_day_check(client: anthropic.Anthropic, memory: Memory, state: dict, con
     except Exception as e:
         logger.error(f"Rest-day check failed: {e}")
         return
-    if msg and msg.strip().upper() != "NONE" and do_send("Rest day", msg, state, config, memory):
+    if msg and msg.strip().upper() != "NONE" and do_send("Rest day", msg, state, config, memory, kind="rest"):
         state[key] = True
         save_state(state)
 
@@ -476,7 +480,7 @@ def run_due_reminders(client: anthropic.Anthropic, memory: Memory, state: dict, 
             logger.error(f"Scheduled reminder [{reminder['id']}] failed: {e}")
             reply = f"A scheduled check-in ({reminder['instruction'][:80]}...) failed to run: {e}"
 
-        if do_send("Scheduled Check-in", reply, state, config, memory):
+        if do_send("Scheduled Check-in", reply, state, config, memory, kind="reminder"):
             logger.info(f"Scheduled reminder [{reminder['id']}] sent")
         else:
             logger.info(f"Scheduled reminder [{reminder['id']}] couldn't send (quiet hours/budget) — retrying next cycle")
@@ -499,15 +503,16 @@ def run_scheduler():
     memory = Memory(session_id="scheduler")
     client = get_client()
 
-    # Verify Signal
+    # Verify Signal. Only required while nothing else reaches the user: with
+    # the phone app paired, Signal is just the optional fallback.
     signal_status = check_signal_api(config)
-    if not signal_status["ok"]:
-        logger.error(f"Signal API not available: {signal_status['error']}")
-        return
-
-    if not config.get("sender_number") or not config.get("recipient_number"):
-        logger.error("Configure sender_number and recipient_number in config.json")
-        return
+    if not signal_status["ok"] or not config.get("sender_number") or not config.get("recipient_number"):
+        problem = signal_status.get("error") or "configure sender_number and recipient_number in config.json"
+        if not notify.has_app_device():
+            logger.error(f"Signal not available ({problem}) and no phone app is paired")
+            return
+        if notify.signal_enabled(config):
+            logger.warning(f"Signal not available ({problem}); notifying the phone app only")
 
     # Verify Anthropic
     try:

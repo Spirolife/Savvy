@@ -33,5 +33,10 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <!-- Direct reply from a notification (notifications/ReplyReceiver.kt). -->
+        <receiver
+            android:name=".notifications.ReplyReceiver"
+            android:exported="false" />
     </application>
 </manifest>

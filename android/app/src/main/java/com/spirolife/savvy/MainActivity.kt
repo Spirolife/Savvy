@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.mutableStateOf
+import com.spirolife.savvy.notifications.NotificationPermission
 import com.spirolife.savvy.ui.nav.Routes
 import com.spirolife.savvy.ui.nav.SavvyNavHost
 import com.spirolife.savvy.ui.theme.SavvyTheme
@@ -17,6 +18,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        NotificationPermission.requestOnceAfterPairing(this)   // Android 13+: asked once, after pairing
         pendingRoute.value = intent?.getStringExtra(EXTRA_ROUTE)
         setContent {
             SavvyTheme {

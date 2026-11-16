@@ -239,7 +239,7 @@ def build_context(user_input: str, memory: Memory, system_template: str = SYSTEM
     return system, messages
 
 
-SURFACE_TAG = {"signal": "[Signal] "}
+SURFACE_TAG = {"signal": "[Signal] ", "app": "[App] "}
 
 # ---------------------------------------------------------------------------
 # Google sign-in links in replies

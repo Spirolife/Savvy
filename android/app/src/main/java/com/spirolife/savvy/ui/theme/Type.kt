@@ -1,23 +1,40 @@
 package com.spirolife.savvy.ui.theme
 
 import androidx.compose.material3.Typography
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.spirolife.savvy.R
 
 /**
- * The site's type: Bricolage Grotesque (display, 800, tight), Atkinson
- * Hyperlegible (body), JetBrains Mono (uppercase kickers).
- *
- * OWNER: app-shell agent replaces these three families with the bundled fonts
- * in res/font (OFL). Everything else references only these names.
+ * The site's type, bundled in res/font (SIL OFL 1.1, see assets/licenses/OFL.txt):
+ * Bricolage Grotesque (display, 800, tight), Atkinson Hyperlegible (body),
+ * JetBrains Mono (uppercase kickers). Bricolage and JetBrains Mono are variable
+ * fonts, so each declared weight pins the wght axis (supported from API 26).
  */
+@OptIn(ExperimentalTextApi::class)
 object SavvyFonts {
-    var display: FontFamily = FontFamily.SansSerif
-    var body: FontFamily = FontFamily.SansSerif
-    var mono: FontFamily = FontFamily.Monospace
+    private fun bricolage(weight: Int) = Font(
+        R.font.bricolage_grotesque, FontWeight(weight),
+        variationSettings = FontVariation.Settings(FontVariation.weight(weight), FontVariation.Setting("opsz", 32f)),
+    )
+
+    private fun jetbrains(weight: Int) = Font(
+        R.font.jetbrains_mono, FontWeight(weight),
+        variationSettings = FontVariation.Settings(FontVariation.weight(weight)),
+    )
+
+    val display: FontFamily = FontFamily(bricolage(600), bricolage(700), bricolage(800))
+    val body: FontFamily = FontFamily(
+        Font(R.font.atkinson_hyperlegible_regular, FontWeight.Normal),
+        Font(R.font.atkinson_hyperlegible_bold, FontWeight.Bold),
+    )
+    val mono: FontFamily = FontFamily(jetbrains(400), jetbrains(500), jetbrains(600))
 }
 
 fun savvyTypography(): Typography {

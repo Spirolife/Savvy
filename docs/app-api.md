@@ -26,7 +26,7 @@ in your final report, and keep both sides in step.
 | Method | Path | Body | Response |
 | --- | --- | --- | --- |
 | GET | `/v1/ping` | | `{"ok": true, "name": "Savvy", "version": "1"}` |
-| POST | `/v1/pair` | `{"code": "123456", "device_name": "Pixel 8"}` | `{"token": "<opaque>"}` · `403 bad_code` |
+| POST | `/v1/pair` | `{"code": "123456", "device_name": "Pixel 8"}` | `{"token": "<opaque>"}` · `403 bad_code` · `429 too_many_attempts` (5 wrong codes in 10 minutes burn the code; make a new one) |
 
 Tokens are stored hashed in `credentials/app_devices.json` (0600).
 
@@ -80,14 +80,14 @@ Labels are `[a-z0-9_-]{1,32}`.
 location and a Maps key is configured; otherwise `leave_by`/`travel_minutes` are null.
 
 - **Event** `{"id", "account", "calendar", "title", "start", "end", "all_day": bool, "location": str|null, "color": "#RRGGBB"|null}`
-- **Task** `{"id", "title", "project": str|null, "due": "YYYY-MM-DD"|null, "priority": 1-4, "completed": bool}`
+- **Task** `{"id", "title", "project": str|null, "due": "YYYY-MM-DD"|null, "priority": 1-4, "completed": bool}` (priority as Todoist's app shows it: 1 = urgent … 4 = normal)
 - **Reminder** `{"id", "text", "at"}`
 
 | Method | Path | Body | Response |
 | --- | --- | --- | --- |
 | POST | `/v1/tasks/{id}/complete` | | `{"ok": true}` |
 | POST | `/v1/tasks/{id}/reopen` | | `{"ok": true}` |
-| POST | `/v1/rest/plan` | `{"day": "2026-11-19"}` | `{"ok": true, "message": "..."}` (books the rest day through the same tool the model uses) |
+| POST | `/v1/rest/plan` | `{"day": "2026-11-19"}` | `{"ok": true, "message": "..."}` (books an all-day "Rest day" on the Rest calendar via `create_allday_event`, as the model does; `502 calendar_error` with the reason on failure) |
 
 ## Chat
 
@@ -190,4 +190,6 @@ sends it over Signal while `signal_fallback` is true.
 
 FCM is optional on both sides: the server needs `credentials/firebase_service_account.json`,
 the app needs `android/app/google-services.json`. Without them the app polls.
-The FCM message is data-only: `{"id", "kind", "title", "body"}`.
+The FCM message is data-only: `{"id", "kind", "title", "body"}` (all strings). A
+body over ~3 KB is clipped to fit FCM's 4 KB limit and the message then also has
+`"truncated": "1"`; the app reads the full text from `/v1/notifications`.

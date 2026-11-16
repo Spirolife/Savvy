@@ -20,5 +20,9 @@ if [ $# -eq 0 ]; then set -- assembleDebug; fi
 
 exec 9>"$here/.build.lock"
 flock 9
-podman run --rm -v "$here":/work:z -v savvy-gradle-cache:/root/.gradle -w /work "$image" \
+# The debug signing key lives in android/.android-home (gitignored) so every build
+# is signed with the same key: Google sign-in is tied to that key's SHA-1.
+mkdir -p "$here/.android-home"
+podman run --rm -v "$here":/work:z -v "$here/.android-home":/root/.android:z \
+    -v savvy-gradle-cache:/root/.gradle -w /work "$image" \
     gradle --no-daemon --console=plain -q --warning-mode=none "$@"

@@ -7,3 +7,5 @@ local.properties
 .kotlin/
 # Your Firebase project's config; see docs/android-setup.md
 app/google-services.json
+# Debug signing key; back it up, Google sign-in is registered to its SHA-1
+.android-home/

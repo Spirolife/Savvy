@@ -675,6 +675,7 @@ class TrayApp(QObject):
         self.services = [
             Service("Signal bot", ["secretary.py", "--signal"], "signal.log", self),
             Service("Scheduler", ["scheduler.py"], "scheduler.log", self),
+            Service("App server", ["app_server.py"], "app_server.log", self),
         ]
         for s in self.services:
             s.changed.connect(self.refresh)
@@ -723,6 +724,7 @@ class TrayApp(QObject):
         self.open_chat_action = m.addAction("Open chat", self.open_chat)
         self.toggle = m.addAction("Pause services", self.toggle_services)
         m.addAction("Restart services", self.restart_services)
+        m.addAction("Pair phone…", self.pair_phone)
         m.addAction("Open logs folder",
                     lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(LOG_DIR))))
         m.addSeparator()
@@ -744,7 +746,7 @@ class TrayApp(QObject):
     # ---- state ---------------------------------------------------------------
     def overall(self) -> tuple[str, str]:
         h = self.health
-        bot, sched = self.services
+        bot, sched = self.services[:2]
         if self.paused:
             return "paused", "Paused"
         if h and not h.get("signal_configured"):
@@ -764,7 +766,7 @@ class TrayApp(QObject):
     @Slot()
     def refresh(self) -> None:
         status, summary = self.overall()
-        bot, sched = self.services
+        bot, sched = self.services[:2]
         h = self.health
         dot = lambda good: "●" if good else "○"
         self.header.setText(f"Savvy — {summary}")
@@ -826,6 +828,17 @@ class TrayApp(QObject):
     def restart_services(self) -> None:
         self.stop_services()
         self.start_services()
+
+    def pair_phone(self) -> None:
+        """Show a one-time code for the Savvy phone app (the app server checks it)."""
+        from PySide6.QtWidgets import QMessageBox
+        try:
+            from app_api.auth import CODE_TTL, new_pairing_code
+            text = (f"Enter this code in the Savvy app:\n\n{new_pairing_code()}\n\n"
+                    f"It works once, for {CODE_TTL // 60} minutes.")
+        except Exception as e:
+            text = f"Couldn't make a pairing code: {e}"
+        QMessageBox.information(None, "Pair phone", text)
 
     def open_chat(self) -> None:
         if self.chat is None:
