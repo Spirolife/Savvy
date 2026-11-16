@@ -1,0 +1,23 @@
+# Build environment for the Savvy Android app: JDK 17, Android SDK 35, Gradle 8.11.1.
+# Used by android/build.sh so nothing has to be installed on the host.
+FROM docker.io/library/eclipse-temurin:17-jdk
+
+RUN apt-get update && apt-get install -y --no-install-recommends unzip curl util-linux \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV ANDROID_HOME=/opt/android-sdk
+ENV PATH=$PATH:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/gradle/bin
+
+RUN mkdir -p $ANDROID_HOME/cmdline-tools \
+    && curl -fsSL -o /tmp/tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
+    && unzip -q /tmp/tools.zip -d $ANDROID_HOME/cmdline-tools \
+    && mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest \
+    && rm /tmp/tools.zip
+
+RUN yes | sdkmanager --licenses > /dev/null \
+    && sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools" > /dev/null
+
+RUN curl -fsSL -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.11.1-bin.zip \
+    && unzip -q /tmp/gradle.zip -d /opt && mv /opt/gradle-8.11.1 /opt/gradle && rm /tmp/gradle.zip
+
+WORKDIR /work

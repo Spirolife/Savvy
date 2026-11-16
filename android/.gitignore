@@ -1,0 +1,9 @@
+.gradle/
+build/
+local.properties
+.build.lock
+.idea/
+*.iml
+.kotlin/
+# Your Firebase project's config; see docs/android-setup.md
+app/google-services.json

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Savvy server is on the user's own PC, reached over Tailscale (WireGuard
+     encrypts the traffic) at an address they type in, so plain HTTP is allowed.
+     Requests carry a device token; the server only answers paired devices. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
