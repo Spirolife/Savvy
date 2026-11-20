@@ -253,7 +253,8 @@ class InboxTests(unittest.TestCase):
         self.assertEqual(body["messages"][2]["starred"], True)
         self.assertIn("T", p1["date"])
         _, kwargs = self.personal.users.return_value.messages.return_value.list.call_args
-        self.assertEqual(kwargs["q"], "in:inbox")
+        self.assertEqual(kwargs["q"], routes_inbox.IMPORTANT_QUERY)
+        email_integration.get_unread_count.assert_called_with(routes_inbox.IMPORTANT_QUERY)
 
     def test_inbox_account_filter_query_and_limit(self):
         res = self.client.get("/v1/inbox?account=personal&q=from:boss&limit=1")

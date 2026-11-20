@@ -70,11 +70,12 @@ def get_recent_emails(max_results=10, hours_back=24):
     return all_emails
 
 
-def get_unread_count():
+def get_unread_count(query="in:inbox"):
+    """Unread messages per account among those matching `query` (an estimate from Gmail)."""
     counts = {}
     for label, service in _get_services():
         try:
-            result = service.users().messages().list(userId="me", q="is:unread in:inbox", maxResults=1).execute()
+            result = service.users().messages().list(userId="me", q=f"is:unread {query}", maxResults=1).execute()
             counts[label] = result.get("resultSizeEstimate", 0)
         except Exception:
             counts[label] = 0

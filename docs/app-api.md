@@ -117,6 +117,7 @@ by `core.finish_pasted_signin` first, as on the other surfaces.
 `{"summary": str|null, "unread": {"personal": 3}, "messages": [Mail]}`
 
 - **Mail** `{"id", "thread_id", "account", "from", "subject", "snippet", "date", "unread": bool, "starred": bool, "important": bool}`
+- Without `q`, `messages` and `unread` cover only mail that is or may be important: in the inbox and starred, or marked Important by Gmail outside the Promotions, Social and Forums tabs. A `q` search covers all mail.
 - `summary` is a one-to-two sentence model summary of important unread mail, cached 15 minutes; may be null.
 
 | Method | Path | Body | Response |

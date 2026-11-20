@@ -150,7 +150,7 @@ private fun InboxContent(
                     }
                     if (state.messages.isEmpty()) {
                         item(key = "empty") {
-                            Text(if (state.query.isBlank()) "Nothing in your inbox." else "No mail matches that search.",
+                            Text(if (state.query.isBlank()) "Nothing important in your inbox." else "No mail matches that search.",
                                 color = c.muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 24.dp))
                         }
                     }

@@ -24,6 +24,14 @@ SUMMARY_TTL = 15 * 60       # seconds a summary is reused
 SUMMARY_WAIT = 4.0          # longest the inbox waits for a fresh summary
 SUMMARY_MODEL = "claude-haiku-4-5"
 
+# The app lists only mail that is or may be important; the full inbox is what
+# the Gmail app is for. "May be important" is Gmail's own Important marker
+# (it learns from what you open and answer), minus the bulk tabs where it
+# also flags sales and newsletters. Starred mail always shows. A search (q)
+# still covers all mail, so anything filtered out can still be looked up.
+IMPORTANT_QUERY = ("in:inbox (is:starred OR "
+                   "(is:important -category:promotions -category:social -category:forums))")
+
 ACTIONS = {         # action -> email_integration function, looked up at call time
     "archive": "archive_email",
     "star": "star_email",
@@ -149,9 +157,9 @@ def inbox(account: str = "all", q: str = "", limit: int = 30):
     if account != "all":
         _check_account(account)
     limit = max(1, min(limit, 100))
-    query = q.strip() or "in:inbox"
+    query = q.strip() or IMPORTANT_QUERY
     try:
-        unread = mail.get_unread_count()
+        unread = mail.get_unread_count(IMPORTANT_QUERY)
     except Exception as e:
         print(f"[app_api] Unread counts failed: {e}")
         unread = {}
