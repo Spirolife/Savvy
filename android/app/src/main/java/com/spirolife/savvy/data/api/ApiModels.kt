@@ -57,12 +57,17 @@ import kotlinx.serialization.json.JsonObject
 
 /** One server-sent event of a chat turn (see "Chat" in docs/app-api.md). */
 sealed interface ChatEvent {
+    /** First on every stream: the turn's id, for catching up if the stream drops. */
+    data class Start(val id: String) : ChatEvent
     data class Text(val delta: String) : ChatEvent
     data class Tool(val name: String, val state: String, val detail: String, val warning: String?) : ChatEvent
     data class Confirm(val id: String, val name: String, val level: Int, val args: JsonObject) : ChatEvent
     data class Done(val reply: String) : ChatEvent
     data class Error(val message: String) : ChatEvent
 }
+
+/** What a turn emitted since event `after`; ask again with [next]. */
+data class TurnEvents(val events: List<ChatEvent>, val next: Int)
 
 // Inbox
 @Serializable data class Mail(

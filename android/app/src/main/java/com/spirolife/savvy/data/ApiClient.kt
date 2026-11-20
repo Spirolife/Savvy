@@ -30,6 +30,7 @@ import com.spirolife.savvy.data.api.Settings
 import com.spirolife.savvy.data.api.Status
 import com.spirolife.savvy.data.api.Task
 import com.spirolife.savvy.data.api.Today
+import com.spirolife.savvy.data.api.TurnEvents
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
@@ -42,6 +43,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNamingStrategy
 import kotlinx.serialization.json.JsonObject
@@ -167,6 +169,9 @@ class ApiClient(
         awaitClose { source.cancel() }
     }.buffer(Channel.UNLIMITED).flowOn(Dispatchers.IO)
 
+    override suspend fun chatTurnEvents(turnId: String, after: Int): TurnEvents =
+        parseTurnEvents(send("GET", apiUrl("v1", "chat", "turns", turnId, "events", query = mapOf("after" to after.toString()))))
+
     override suspend fun confirm(id: String, allow: Boolean): Ok =
         post(encode(ConfirmRequest(id, if (allow) "allow" else "deny")), "v1", "chat", "confirm")
 
@@ -291,6 +296,7 @@ class ApiClient(
 internal fun parseChatEvent(type: String?, data: String): ChatEvent? {
     val o = runCatching { SavvyJson.parseToJsonElement(data).jsonObject }.getOrNull() ?: return null
     return when (type) {
+        "start" -> ChatEvent.Start(o.string("id") ?: return null)
         "text" -> ChatEvent.Text(o.string("delta").orEmpty())
         "tool" -> ChatEvent.Tool(
             name = o.string("name").orEmpty(),
@@ -308,6 +314,16 @@ internal fun parseChatEvent(type: String?, data: String): ChatEvent? {
         "error" -> ChatEvent.Error(o.string("message") ?: "Something went wrong on your PC.")
         else -> null
     }
+}
+
+/** `{"events": [{"event": "text", "data": {...}}], "next": 7}`; events the app doesn't know are skipped. */
+internal fun parseTurnEvents(body: String): TurnEvents {
+    val o = SavvyJson.parseToJsonElement(body).jsonObject
+    val events = (o["events"] as? JsonArray).orEmpty().mapNotNull { e ->
+        val item = e as? JsonObject ?: return@mapNotNull null
+        parseChatEvent(item.string("event"), (item["data"] as? JsonObject ?: return@mapNotNull null).toString())
+    }
+    return TurnEvents(events, (o["next"] as? JsonPrimitive)?.intOrNull ?: 0)
 }
 
 private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull

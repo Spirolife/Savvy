@@ -30,6 +30,8 @@ interface SavvyApi {
 
     /** One chat turn as a stream of events; completes after Done or Error. */
     fun chat(message: String): Flow<ChatEvent>
+    /** A turn's events from index [after] on (counted after Start), for catching up after the stream dropped. */
+    suspend fun chatTurnEvents(turnId: String, after: Int): TurnEvents
     suspend fun confirm(id: String, allow: Boolean): Ok
     suspend fun chatHistory(limit: Int = 40): List<ChatMessage>
 

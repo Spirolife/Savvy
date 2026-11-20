@@ -4,6 +4,7 @@ import com.spirolife.savvy.data.api.ApiException
 import com.spirolife.savvy.data.api.ChatEvent
 import com.spirolife.savvy.data.api.ChatMessage
 import com.spirolife.savvy.data.api.Ok
+import com.spirolife.savvy.data.api.TurnEvents
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -124,6 +125,62 @@ class ChatViewModelTest {
         vm.setDraft("hi"); vm.send()
         assertEquals("model down", vm.state.value.error)
         assertFalse(vm.state.value.running)
+    }
+
+    @Test fun droppedStreamCatchesUpInsteadOfFailing() = runTest {
+        val asked = mutableListOf<Pair<String, Int>>()
+        var calls = 0
+        val vm = ChatViewModel(object : ChatInboxFakeApi() {
+            override fun chat(message: String) = flow {
+                emit(ChatEvent.Start("t1"))
+                emit(ChatEvent.Text("Let me "))
+                throw java.io.IOException("Software caused connection abort")
+            }
+            override suspend fun chatTurnEvents(turnId: String, after: Int): TurnEvents {
+                asked += turnId to after
+                return when (calls++) {
+                    0 -> throw java.io.IOException("still in the background")
+                    1 -> TurnEvents(listOf(ChatEvent.Text("check."), ChatEvent.Tool("find_event", "read", "1 item(s)", null)), 3)
+                    else -> TurnEvents(listOf(ChatEvent.Text("Done."), ChatEvent.Done("Done.")), 5)
+                }
+            }
+        }, catchUpDelayMs = 0)
+        vm.setDraft("move it"); vm.send()
+        val s = vm.state.value
+        assertNull(s.error)
+        assertFalse(s.running)
+        assertFalse(s.reconnecting)
+        assertEquals(listOf("t1" to 1, "t1" to 1, "t1" to 3), asked)
+        val items = s.items
+        assertEquals("Let me check.", (items[1] as ChatItem.Assistant).text)
+        assertEquals("read", (items[2] as ChatItem.ToolCard).state)
+        assertEquals("Done.", (items[3] as ChatItem.Assistant).text)
+        assertEquals(4, items.size)
+    }
+
+    @Test fun catchUpGivesUpAfterRepeatedFailures() = runTest {
+        var calls = 0
+        val vm = ChatViewModel(object : ChatInboxFakeApi() {
+            override fun chat(message: String) = flow<ChatEvent> { emit(ChatEvent.Start("t1")) }
+            override suspend fun chatTurnEvents(turnId: String, after: Int): TurnEvents {
+                calls++; throw java.io.IOException("offline")
+            }
+        }, catchUpDelayMs = 0, maxCatchUpFailures = 3)
+        vm.setDraft("hi"); vm.send()
+        assertEquals(3, calls)
+        assertFalse(vm.state.value.running)
+        assertEquals("hi", vm.state.value.retryText)
+    }
+
+    @Test fun lostTurnAsksToSendAgain() = runTest {
+        val vm = ChatViewModel(object : ChatInboxFakeApi() {
+            override fun chat(message: String) = flow<ChatEvent> { emit(ChatEvent.Start("t1")) }
+            override suspend fun chatTurnEvents(turnId: String, after: Int): TurnEvents =
+                throw ApiException(404, "no_turn", "That answer is no longer available.")
+        }, catchUpDelayMs = 0)
+        vm.setDraft("hi"); vm.send()
+        assertTrue(vm.state.value.error!!.contains("Send it again"))
+        assertEquals("hi", vm.state.value.retryText)
     }
 
     @Test fun confirmCopyReadsLikeAnEmail() {

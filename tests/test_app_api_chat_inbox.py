@@ -111,6 +111,9 @@ class ChatTests(unittest.TestCase):
                     name = line[len("event: "):]
                 elif line.startswith("data: "):
                     data = json.loads(line[len("data: "):])
+                    if name == "start":
+                        self.turn_id = data["id"]
+                        continue
                     events.append((name, data))
                     if name == "confirm" and answer:
                         res = self.client.post("/v1/chat/confirm", json={"id": data["id"], "decision": answer})
@@ -120,10 +123,10 @@ class ChatTests(unittest.TestCase):
     def test_stream_framing_and_order(self):
         with self.client.stream("POST", "/v1/chat", json={"message": "hi"}) as r:
             raw = "".join(r.iter_text())
-        self.assertTrue(raw.startswith('event: text\ndata: {"delta": "Hel"}\n\n'))
+        self.assertRegex(raw, r'^event: start\ndata: \{"id": "[0-9a-f]{12}"\}\n\nevent: text\ndata: \{"delta": "Hel"\}\n\n')
         events = parse_sse(raw.splitlines())
-        self.assertEqual([e for e, _ in events], ["text", "text", "tool", "done"])
-        self.assertEqual(events[2][1], {"name": "list_events", "state": "read",
+        self.assertEqual([e for e, _ in events], ["start", "text", "text", "tool", "done"])
+        self.assertEqual(events[3][1], {"name": "list_events", "state": "read",
                                         "detail": "2 item(s)", "warning": None})
         self.assertEqual(events[-1][1], {"reply": "Hello"})
 
@@ -164,14 +167,64 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(res.status_code, 409)
         self.assertEqual(res.json()["error"], "busy")
 
-    def test_disconnect_denies_pending_confirm(self):
-        with self.client.stream("POST", "/v1/chat", json={"message": "send an email"}) as r:
-            for line in r.iter_lines():
-                if line == "event: confirm":
-                    break
+    def wait_for_turn_end(self):
         deadline = time.monotonic() + 5
         while routes_chat._turn_lock.locked() and time.monotonic() < deadline:
             time.sleep(0.02)
+
+    def test_catch_up_after_the_stream_finished(self):
+        self.stream_turn("hi")
+        res = self.client.get(f"/v1/chat/turns/{self.turn_id}/events?after=0")
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        # The two text deltas come back as one.
+        self.assertEqual([(e["event"], e["data"]) for e in body["events"]][:1], [("text", {"delta": "Hello"})])
+        self.assertEqual([e["event"] for e in body["events"]], ["text", "tool", "done"])
+        self.assertEqual(body["next"], 4)
+        later = self.client.get(f"/v1/chat/turns/{self.turn_id}/events?after=3").json()
+        self.assertEqual([e["event"] for e in later["events"]], ["done"])
+        self.assertEqual(self.client.get(f"/v1/chat/turns/{self.turn_id}/events?after=4").json(),
+                         {"events": [], "next": 4})
+
+    def test_unknown_turn_404(self):
+        res = self.client.get("/v1/chat/turns/nope/events")
+        self.assertEqual(res.status_code, 404)
+        self.assertEqual(res.json()["error"], "no_turn")
+
+    def test_disconnect_keeps_confirm_open_for_catch_up(self):
+        # The test client can't drop a connection mid-stream, so do what a real
+        # disconnect does on the server: abandon the turn.
+        with mock.patch.object(routes_chat, "KEEPALIVE", 0.05):
+            streamer = threading.Thread(target=self.stream_turn, args=("send an email",), daemon=True)
+            streamer.start()
+            deadline = time.monotonic() + 5
+            while not routes_chat._pending and time.monotonic() < deadline:
+                time.sleep(0.02)
+            turn = routes_chat._last_turn
+            turn.abandon()
+            time.sleep(0.1)
+            # The stream is gone, but the turn still waits for an answer.
+            self.assertTrue(routes_chat._turn_lock.locked())
+            self.assertEqual(self.decisions, [])
+            events = self.client.get(f"/v1/chat/turns/{turn.id}/events").json()["events"]
+            confirm = [e for e in events if e["event"] == "confirm"]
+            self.assertEqual(len(confirm), 1)
+            res = self.client.post("/v1/chat/confirm", json={"id": confirm[0]["data"]["id"], "decision": "allow"})
+            self.assertEqual(res.json(), {"ok": True})
+            self.wait_for_turn_end()
+            streamer.join(5)
+            self.assertFalse(streamer.is_alive())
+        self.assertEqual(self.decisions, ["approve"])
+        events = self.client.get(f"/v1/chat/turns/{turn.id}/events").json()["events"]
+        self.assertEqual([e["event"] for e in events], ["text", "tool", "tool", "done"])   # answered confirm left out
+
+    def test_disconnected_confirm_still_times_out(self):
+        with mock.patch.object(routes_chat, "CONFIRM_TIMEOUT", 0.2):
+            with self.client.stream("POST", "/v1/chat", json={"message": "send an email"}) as r:
+                for line in r.iter_lines():
+                    if line == "event: confirm":
+                        break
+            self.wait_for_turn_end()
         self.assertEqual(self.decisions, ["deny"])
 
     def test_error_event(self):

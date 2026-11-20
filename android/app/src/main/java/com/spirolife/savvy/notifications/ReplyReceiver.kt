@@ -108,7 +108,7 @@ class ReplyWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
                     is ChatEvent.Confirm -> { declined += e.name; decline(e.id) }
                     is ChatEvent.Done -> done = e.reply
                     is ChatEvent.Error -> throw IllegalStateException(e.message)
-                    is ChatEvent.Tool -> Unit
+                    is ChatEvent.Tool, is ChatEvent.Start -> Unit
                 }
             }
             var reply = (done ?: text.toString()).trim().ifEmpty { "(no reply)" }

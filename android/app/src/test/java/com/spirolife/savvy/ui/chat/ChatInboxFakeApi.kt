@@ -17,6 +17,7 @@ open class ChatInboxFakeApi : SavvyApi {
     override suspend fun reopenTask(id: String): Ok = TODO()
     override suspend fun planRestDay(day: String): Ok = TODO()
     override fun chat(message: String): Flow<ChatEvent> = TODO()
+    override suspend fun chatTurnEvents(turnId: String, after: Int): TurnEvents = TODO()
     override suspend fun confirm(id: String, allow: Boolean): Ok = TODO()
     override suspend fun chatHistory(limit: Int): List<ChatMessage> = emptyList()
     override suspend fun inbox(account: String, query: String?, limit: Int): Inbox = TODO()

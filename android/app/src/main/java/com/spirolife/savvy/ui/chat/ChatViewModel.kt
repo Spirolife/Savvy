@@ -1,12 +1,14 @@
 package com.spirolife.savvy.ui.chat
 
 import androidx.lifecycle.ViewModel
+import java.io.IOException
 import androidx.lifecycle.viewModelScope
 import com.spirolife.savvy.data.api.ApiException
 import com.spirolife.savvy.data.api.ChatEvent
 import com.spirolife.savvy.data.api.SavvyApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,6 +32,8 @@ data class ChatUiState(
     val loadingHistory: Boolean = true,
     val historyError: String? = null,
     val running: Boolean = false,
+    /** The stream dropped (the app went to the background, say); catching up with the PC. */
+    val reconnecting: Boolean = false,
     val confirm: ChatEvent.Confirm? = null,
     /** The last turn failed; [retryText] can be sent again. */
     val error: String? = null,
@@ -40,8 +44,17 @@ data class ChatUiState(
 /**
  * Chat: history, one streamed turn at a time, confirmations. The turn runs in
  * [viewModelScope], so leaving the Chat tab doesn't cancel it.
+ *
+ * Android cuts the stream when the app goes to the background, but the turn
+ * carries on on the PC. So once the turn has started, a dropped stream isn't an
+ * error: the app polls the turn's events every [catchUpDelayMs] until it ends,
+ * and gives up only after [maxCatchUpFailures] failed polls in a row.
  */
-class ChatViewModel(private val api: SavvyApi) : ViewModel() {
+class ChatViewModel(
+    private val api: SavvyApi,
+    private val catchUpDelayMs: Long = 3_000,
+    private val maxCatchUpFailures: Int = 200,     // ~10 minutes at 3 s
+) : ViewModel() {
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
@@ -99,23 +112,65 @@ class ChatViewModel(private val api: SavvyApi) : ViewModel() {
             )
         }
         turn = viewModelScope.launch {
-            var streamed = false
-            var finished = false
+            val t = TurnProgress(text)
             try {
                 api.chat(text).collect { event ->
-                    when (event) {
-                        is ChatEvent.Text -> { streamed = true; appendText(event.delta) }
-                        is ChatEvent.Tool -> addTool(event)
-                        is ChatEvent.Confirm -> _state.update { it.copy(confirm = event) }
-                        is ChatEvent.Done -> { finished = true; finish(event.reply, streamed) }
-                        is ChatEvent.Error -> { finished = true; fail(event.message, text) }
-                    }
+                    if (event is ChatEvent.Start) t.id = event.id else { t.received++; handle(event, t) }
                 }
-                if (!finished) fail("The connection to your PC closed before Savvy finished.", text)
+                if (!t.finished) catchUpOrFail(t, IOException("The connection to your PC closed before Savvy finished."))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                fail(friendly(e), text)
+                catchUpOrFail(t, e)
+            }
+        }
+    }
+
+    /** One turn as the app has seen it so far. */
+    private class TurnProgress(val text: String) {
+        var id: String? = null
+        var received = 0            // events after Start, which is what the server counts
+        var streamed = false
+        var finished = false
+    }
+
+    private fun handle(event: ChatEvent, t: TurnProgress) {
+        when (event) {
+            is ChatEvent.Start -> {}
+            is ChatEvent.Text -> { t.streamed = true; appendText(event.delta) }
+            is ChatEvent.Tool -> addTool(event)
+            is ChatEvent.Confirm -> _state.update { it.copy(confirm = event) }
+            is ChatEvent.Done -> { t.finished = true; finish(event.reply, t.streamed) }
+            is ChatEvent.Error -> { t.finished = true; fail(event.message, t.text) }
+        }
+    }
+
+    /**
+     * The stream ended early. A refusal from the server (busy, unpaired) or a
+     * stream that never started is a real failure; otherwise the turn is still
+     * running on the PC, so fetch what was missed until it ends.
+     */
+    private suspend fun catchUpOrFail(t: TurnProgress, cause: Exception) {
+        val id = t.id
+        if (id == null || cause is ApiException) return fail(friendly(cause), t.text)
+        _state.update { it.copy(reconnecting = true) }
+        var failures = 0
+        while (!t.finished) {
+            delay(catchUpDelayMs)
+            try {
+                val got = api.chatTurnEvents(id, t.received)
+                failures = 0
+                _state.update { it.copy(reconnecting = false) }
+                t.received = got.next
+                got.events.forEach { handle(it, t) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: ApiException) {
+                if (e.status == 404) return fail("Your PC lost that answer (Savvy restarted?). Send it again.", t.text)
+                if (++failures >= maxCatchUpFailures) return fail(friendly(e), t.text)
+            } catch (e: Exception) {
+                _state.update { it.copy(reconnecting = true) }
+                if (++failures >= maxCatchUpFailures) return fail(friendly(e), t.text)
             }
         }
     }
@@ -149,11 +204,12 @@ class ChatViewModel(private val api: SavvyApi) : ViewModel() {
                 }
             }
         }
-        s.copy(items = items, running = false, confirm = null)
+        s.copy(items = items, running = false, reconnecting = false, confirm = null)
     }
 
     private fun fail(message: String, text: String) = _state.update { s ->
-        s.copy(items = endStreaming(s.items), running = false, confirm = null, error = message, retryText = text)
+        s.copy(items = endStreaming(s.items), running = false, reconnecting = false, confirm = null,
+            error = message, retryText = text)
     }
 
     private fun endStreaming(items: List<ChatItem>): List<ChatItem> {
@@ -171,11 +227,16 @@ class ChatViewModel(private val api: SavvyApi) : ViewModel() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: ApiException) {
-                if (e.status != 404) _state.update { it.copy(error = friendly(e)) }   // 404: it already timed out
+                if (e.status != 404) reopen(c, friendly(e))     // 404: it already timed out
             } catch (e: Exception) {
-                _state.update { it.copy(error = friendly(e)) }
+                reopen(c, friendly(e))
             }
         }
+    }
+
+    /** The answer didn't reach the PC, which is still waiting: show the sheet again. */
+    private fun reopen(c: ChatEvent.Confirm, message: String) = _state.update {
+        it.copy(error = message, confirm = if (it.running && it.confirm == null) c else it.confirm)
     }
 
     private fun friendly(e: Exception): String = when {

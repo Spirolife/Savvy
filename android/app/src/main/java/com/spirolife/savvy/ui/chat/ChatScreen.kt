@@ -131,8 +131,8 @@ private fun ChatContent(
                             is ChatItem.ToolCard -> ToolCardRow(item)
                         }
                     }
-                    if (state.running && last !is ChatItem.Assistant) {
-                        item(key = "thinking") { Thinking() }
+                    if (state.running && (state.reconnecting || last !is ChatItem.Assistant)) {
+                        item(key = "thinking") { Thinking(state.reconnecting) }
                     }
                     state.error?.let { msg ->
                         item(key = "error") { ErrorRow(msg, canRetry = state.retryText != null && !state.running, onRetry) }
@@ -223,8 +223,8 @@ private fun ToolCardRow(item: ChatItem.ToolCard) {
 }
 
 @Composable
-private fun Thinking() {
-    Text("Savvy is thinking…", color = SavvyTheme.colors.muted, style = MaterialTheme.typography.bodySmall)
+private fun Thinking(reconnecting: Boolean) {
+    Text(if (reconnecting) "Reconnecting to your PC…" else "Savvy is thinking…", color = SavvyTheme.colors.muted, style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable

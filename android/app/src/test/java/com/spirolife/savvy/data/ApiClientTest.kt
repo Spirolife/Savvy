@@ -197,6 +197,15 @@ class ApiClientTest {
         assertEquals(ChatEvent.Text(""), parseChatEvent("text", "{}"))
     }
 
+    @Test fun parsesStartAndTurnEvents() {
+        assertEquals(ChatEvent.Start("abc"), parseChatEvent("start", """{"id": "abc"}"""))
+        val got = parseTurnEvents(
+            """{"events": [{"event": "text", "data": {"delta": "Hi"}}, {"event": "mystery", "data": {}},
+                {"event": "done", "data": {"reply": "Hi"}}], "next": 5}""")
+        assertEquals(listOf(ChatEvent.Text("Hi"), ChatEvent.Done("Hi")), got.events)
+        assertEquals(5, got.next)
+    }
+
     @Test fun normalizesBaseUrls() {
         assertEquals("http://my-pc:8765", normalizeBaseUrl("my-pc"))
         assertEquals("http://100.64.0.3:8765", normalizeBaseUrl(" 100.64.0.3 "))

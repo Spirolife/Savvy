@@ -3,12 +3,18 @@
 One turn runs on its own thread through core.respond, exactly like the desktop
 window's ChatWorker; its callbacks are bridged to the HTTP response through an
 asyncio queue and sent as server-sent events (docs/app-api.md, "Chat").
+
+The phone drops the stream whenever the app goes to the background, but the
+turn carries on regardless. Each turn keeps a log of its events, so the app
+catches up afterwards through GET /v1/chat/turns/{id}/events instead of
+sending the message again.
 """
 
 import asyncio
 import itertools
 import json
 import threading
+import uuid
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -29,6 +35,7 @@ _turn_lock = threading.Lock()           # one turn at a time
 _pending: dict[str, "_Pending"] = {}    # confirm id -> waiting confirmation
 _pending_lock = threading.Lock()
 _ids = itertools.count(1)
+_last_turn: "_Turn | None" = None       # the newest turn, running or finished
 _client = None
 _client_lock = threading.Lock()
 
@@ -101,9 +108,14 @@ class _Turn:
     def __init__(self, loop: asyncio.AbstractEventLoop):
         self.loop = loop
         self.queue: asyncio.Queue = asyncio.Queue()
-        self.gone = False       # the client disconnected; nothing more is delivered
+        self.gone = False       # the stream closed; events only go to the log
+        self.id = uuid.uuid4().hex[:12]
+        self.events: list[tuple[str, dict]] = []    # everything emitted, for catching up
+        self.events_lock = threading.Lock()
 
     def emit(self, event: str, data: dict) -> None:
+        with self.events_lock:
+            self.events.append((event, data))
         if self.gone:
             return
         try:
@@ -115,9 +127,10 @@ class _Turn:
         self.emit("tool", describe(name, result))
 
     def ask(self, name: str, inp: dict, _call_id: str, level: int) -> str:
-        """The tool gate's prompt handler: runs on the turn's thread and blocks."""
-        if self.gone:
-            return "deny"
+        """The tool gate's prompt handler: runs on the turn's thread and blocks.
+
+        It waits even after the stream closed: the app answers when it catches up.
+        """
         cid = f"c{next(_ids)}"
         pending = _Pending(self)
         with _pending_lock:
@@ -133,13 +146,28 @@ class _Turn:
                 _pending.pop(cid, None)
 
     def abandon(self) -> None:
-        """The client went away: deny whatever it was asked, let the turn finish."""
+        """The stream closed: stop queueing. The turn runs on, and a pending
+        confirmation stays open for the app to answer after catching up (it is
+        still denied after CONFIRM_TIMEOUT)."""
         self.gone = True
+
+    def events_after(self, after: int) -> tuple[list[dict], int]:
+        """Events from index `after` on, with neighbouring text deltas merged and
+        confirmations that are no longer waiting left out; plus the next index."""
+        with self.events_lock:
+            events = self.events[after:]
+            total = len(self.events)
         with _pending_lock:
-            for p in _pending.values():
-                if p.turn is self:
-                    p.decision = "deny"
-                    p.decided.set()
+            waiting = set(_pending)
+        out: list[dict] = []
+        for event, data in events:
+            if event == "confirm" and data.get("id") not in waiting:
+                continue
+            if event == "text" and out and out[-1]["event"] == "text":
+                out[-1] = {"event": "text", "data": {"delta": out[-1]["data"]["delta"] + data["delta"]}}
+                continue
+            out.append({"event": event, "data": data})
+        return out, total
 
 
 def _run_turn(text: str, turn: _Turn) -> None:
@@ -192,7 +220,9 @@ async def chat(body: ChatBody, request: Request):
         raise ApiError(400, "empty", "The message is empty.")
     if not _turn_lock.acquire(blocking=False):
         raise ApiError(409, "busy", "Savvy is still answering the last message.")
+    global _last_turn
     turn = _Turn(asyncio.get_running_loop())
+    _last_turn = turn
     try:
         threading.Thread(target=_run_turn, args=(text, turn), daemon=True, name="app-chat").start()
     except Exception:
@@ -201,20 +231,38 @@ async def chat(body: ChatBody, request: Request):
 
     async def stream():
         try:
+            yield sse("start", {"id": turn.id})
             while True:
                 try:
                     event, data = await asyncio.wait_for(turn.queue.get(), KEEPALIVE)
                 except (asyncio.TimeoutError, TimeoutError):
+                    if turn.gone:   # abandoned: nothing more will be queued
+                        return
                     yield ": keepalive\n\n"
                     continue
                 yield sse(event, data)
                 if event in ("done", "error"):
                     return
         finally:
-            turn.abandon()      # no-op once finished; denies pending confirms on disconnect
+            turn.abandon()      # the turn runs on; the app catches up through turn_events
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.get("/chat/turns/{turn_id}/events")
+def turn_events(turn_id: str, after: int = 0):
+    """What a turn emitted from event `after` on, for an app whose stream dropped.
+
+    `next` is the `after` to ask with next time; the turn is over once a done or
+    error event has been delivered. 404 once the turn is gone (a newer one
+    started, or the server restarted, which also ended it).
+    """
+    turn = _last_turn
+    if turn is None or turn.id != turn_id:
+        raise ApiError(404, "no_turn", "That answer is no longer available.")
+    events, total = turn.events_after(max(0, after))
+    return {"events": events, "next": total}
 
 
 @router.post("/chat/confirm")

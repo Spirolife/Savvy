@@ -96,6 +96,7 @@ a second concurrent request gets `409 busy`. Events (each `data:` is JSON):
 
 | `event:` | data |
 | --- | --- |
+| `start` | `{"id": "3f9a..."}` the turn's id, always first |
 | `text` | `{"delta": "..."}` streamed reply text |
 | `tool` | `{"name": "move_event", "state": "read"\|"done"\|"denied"\|"error", "detail": "...", "warning": str\|null}` (from `tool_diagnostics.describe_tool_result`) |
 | `confirm` | `{"id": "c1", "name": "send_email", "level": 2, "args": {...}}` the turn pauses until answered |
@@ -105,7 +106,15 @@ a second concurrent request gets `409 busy`. Events (each `data:` is JSON):
 | Method | Path | Body | Response |
 | --- | --- | --- | --- |
 | POST | `/v1/chat/confirm` | `{"id": "c1", "decision": "allow"\|"deny"}` | `{"ok": true}` · `404` when nothing is waiting. Unanswered after 5 minutes → deny. |
+| GET | `/v1/chat/turns/{id}/events?after=0` | | `{"events": [{"event": "text", "data": {...}}], "next": 7}` · `404` when that turn is gone |
 | GET | `/v1/chat/history?limit=40` | | `[{"role": "user"\|"assistant", "content": "...", "ts": "...", "surface": "app"\|"signal"\|"desktop"}]` oldest first |
+
+**When the stream drops** (Android cuts it when the app goes to the background),
+the turn carries on and its reply is still saved. The app catches up with
+`GET /v1/chat/turns/{id}/events?after=n`, where `n` counts the events it already
+got after `start`, then asks again with `next` until it sees `done` or `error`.
+Neighbouring `text` events come back merged, and a `confirm` is included only
+while it is still waiting: closing the stream no longer denies it.
 
 Server side: `core.respond(..., surface="app")` with a `Memory(session_id="app")`;
 markdown replies (like the desktop). A pasted Google sign-in redirect is handled
