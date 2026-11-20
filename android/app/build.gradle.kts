@@ -20,8 +20,9 @@ android {
         applicationId = "com.spirolife.savvy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // android/build.sh passes these from the git commit count; see android/release.sh.
+        versionCode = (findProperty("savvyVersionCode") as String?)?.toIntOrNull() ?: 1
+        versionName = (findProperty("savvyVersionName") as String?) ?: "0.1.0-dev"
     }
 
     buildTypes {

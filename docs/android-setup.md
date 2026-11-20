@@ -105,11 +105,50 @@ then pair again on the phones you still have.
 
 ## Installing the app
 
-<!-- TODO(app-shell agent): how to build (android/build.sh), the fixed signing
-keystore and where it lives, and installing the APK on the phone (adb install or
-copying the APK). -->
+The app is published as GitHub Releases of this repo, and
+[Obtainium](https://github.com/ImranR98/Obtainium) on the phone installs it from
+there and offers each new release as an update.
 
-TODO: build and install steps.
+### On the phone (once)
+
+1. Install Obtainium from its GitHub releases page or F-Droid.
+2. In Obtainium: **Add App**, paste `https://github.com/Spirolife/Savvy`, tap
+   **Add**, then **Install**. Allow Obtainium to install apps when Android asks.
+   If Savvy is already installed from an APK, this replaces it and keeps your
+   pairing.
+3. From then on, Obtainium shows **Update** when there's a new release (it checks
+   in the background and notifies you, or pull down to check now).
+
+### Publishing an update (on the PC)
+
+Commit the change, then:
+
+```sh
+android/release.sh                  # notes list the commits since the last release
+android/release.sh "What changed"   # or write the notes yourself
+```
+
+It runs the app's tests, builds the APK, tags the commit `v0.1.<commit count>`,
+pushes just that tag, and uploads `Savvy-<version>.apk` to a new release. The
+version comes from the commit count, so it goes up with every commit and the
+phone accepts it as an update. The release is public, like the repo; the APK
+holds no keys and only works after pairing with your PC.
+
+### Building by hand
+
+`android/build.sh` builds `android/app/build/outputs/apk/debug/app-debug.apk` in a
+container (no JDK or Android SDK needed on the PC); `android/build.sh
+testDebugUnitTest` runs the tests. Install it with `adb install -r <apk>` or by
+copying it to the phone.
+
+### The signing key
+
+Every build is signed with `android/.android-home/debug.keystore` (gitignored).
+**Back it up.** Google sign-in is registered to its SHA-1 (step 3b above), and
+Android only installs an update signed with the same key as the installed app.
+If the folder is missing, a build makes a new key, and then sign-in fails and the
+phone refuses the update until you uninstall. `release.sh` refuses to run
+without it.
 
 ## Notifications (Firebase)
 
