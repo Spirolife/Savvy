@@ -31,7 +31,7 @@ from pathlib import Path
 
 from PySide6.QtCore import (
     QFileSystemWatcher, QIODeviceBase, QObject, QProcess, QProcessEnvironment, QRectF, QSize, Qt,
-    QThread, QTimer, QUrl, Signal, Slot,
+    QEvent, QThread, QTimer, QUrl, Signal, Slot,
 )
 from PySide6.QtGui import (
     QAction, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QKeyEvent,
@@ -498,6 +498,7 @@ class ChatWorker(QObject):
     done = Signal(str)
     failed = Signal(str)
     history = Signal(list)
+    caught_up = Signal(list)
     confirm = Signal(str, str, int)     # tool name, pretty args, level
 
     def __init__(self):
@@ -538,6 +539,15 @@ class ChatWorker(QObject):
             self.history.emit(self.memory.retrieve_recent(n=30))
         except Exception as e:
             self.failed.emit(str(e))
+
+    @Slot(float)
+    def catch_up(self, after: float) -> None:
+        """Messages from the app, Signal and check-ins saved since `after`."""
+        try:
+            self._ensure()
+            self.caught_up.emit(self.memory.retrieve_others_since(after))
+        except Exception as e:
+            print(f"[desktop] Catching up on other chats failed: {e}")
 
     @Slot(str)
     def ask(self, text: str) -> None:
@@ -617,6 +627,7 @@ def _mix(a: QColor, b: QColor, t: float) -> QColor:
 class ChatWindow(QWidget):
     send_to_worker = Signal(str)
     want_history = Signal()
+    want_catch_up = Signal(float)      # newest saved timestamp already shown
 
     def __init__(self):
         super().__init__()
@@ -651,6 +662,7 @@ class ChatWindow(QWidget):
 
         self.messages: list[tuple] = []   # ("you"|"savvy"|"note", text) or ("tool", info)
         self.busy = False
+        self.seen_ts = 0.0                # newest saved message shown, for catch_up()
         self._render_timer = QTimer(self, singleShot=True, interval=60)
         self._render_timer.timeout.connect(self._render)
 
@@ -659,6 +671,8 @@ class ChatWindow(QWidget):
         self.worker.moveToThread(self.thread)
         self.send_to_worker.connect(self.worker.ask)
         self.want_history.connect(self.worker.load_history)
+        self.want_catch_up.connect(self.worker.catch_up)
+        self.worker.caught_up.connect(self._on_caught_up)
         self.worker.chunk.connect(self._on_chunk)
         self.worker.tool.connect(self._on_tool)
         self.worker.done.connect(self._on_done)
@@ -682,7 +696,7 @@ class ChatWindow(QWidget):
         prev = None
         for who, payload in self.messages:
             who, _, via = who.partition(":")
-            via = " · via Signal" if via == "signal" else ""
+            via = {"signal": " · via Signal", "app": " · via app"}.get(via, "")
             if who == "savvy" and not str(payload).strip() and prev == "tool":
                 continue            # the "\n" streamed before a tool call
             if not first:
@@ -788,19 +802,54 @@ class ChatWindow(QWidget):
         self.input.setFocus()
 
     # ---- worker signals -----------------------------------------------------
-    def _on_history(self, rows: list) -> None:
-        hist = []
+    @staticmethod
+    def _history_entries(rows: list) -> list[tuple]:
+        """Saved messages as (who, text), tagged with the surface they came from."""
+        out = []
         for r in rows:
             who, text = ("you" if r["role"] == "user" else "savvy"), r["content"]
-            if text.startswith("[Signal] "):
-                text = text[len("[Signal] "):]
-                who += ":signal"
-            hist.append((who, text))
+            for tag, via in (("[Signal] ", "signal"), ("[App] ", "app")):
+                if text.startswith(tag):
+                    text, who = text[len(tag):], f"{who}:{via}"
+                    break
+            out.append((who, text))
+        return out
+
+    def _note_seen(self, rows: list) -> None:
+        for r in rows:
+            try:
+                self.seen_ts = max(self.seen_ts, float(r["timestamp"]))
+            except (KeyError, TypeError, ValueError):
+                pass
+
+    def _on_history(self, rows: list) -> None:
+        hist = self._history_entries(rows)
+        self._note_seen(rows)
         if hist:
             hist.append(("note", "earlier messages above"))
         self.messages = hist + self.messages
         self._render()
         self.view.verticalScrollBar().setValue(self.view.verticalScrollBar().maximum())
+
+    def _on_caught_up(self, rows: list) -> None:
+        """Messages said elsewhere (the app, Signal, check-ins) since the last look."""
+        rows = [r for r in rows if float(r.get("timestamp") or 0) > self.seen_ts]
+        if not rows:
+            return
+        self._note_seen(rows)
+        self.messages += self._history_entries(rows)
+        self._render()
+        self.view.verticalScrollBar().setValue(self.view.verticalScrollBar().maximum())
+
+    def catch_up(self) -> None:
+        """Fetch what was said on other surfaces, unless a reply is in progress."""
+        if not self.busy:
+            self.want_catch_up.emit(self.seen_ts)
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            self.catch_up()
 
     def _on_chunk(self, text: str) -> None:
         if self.messages[-1][0] != "savvy":     # text resuming after a tool card

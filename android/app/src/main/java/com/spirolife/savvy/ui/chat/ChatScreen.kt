@@ -48,7 +48,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.spirolife.savvy.Graph
@@ -71,6 +75,18 @@ fun ChatScreen(nav: NavController) {
 
     LaunchedEffect(prefill) {
         if (prefill != null) ChatPrefill.take()?.let(vm::setDraft)
+    }
+
+    // Pick up what was said on the desktop or Signal: on every return to the
+    // app, then every 30 s while it's on screen (never in the background).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                vm.catchUp()
+                delay(30_000)
+            }
+        }
     }
 
     ChatContent(

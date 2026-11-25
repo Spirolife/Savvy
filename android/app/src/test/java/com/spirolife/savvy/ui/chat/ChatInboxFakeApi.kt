@@ -19,7 +19,7 @@ open class ChatInboxFakeApi : SavvyApi {
     override fun chat(message: String): Flow<ChatEvent> = TODO()
     override suspend fun chatTurnEvents(turnId: String, after: Int): TurnEvents = TODO()
     override suspend fun confirm(id: String, allow: Boolean): Ok = TODO()
-    override suspend fun chatHistory(limit: Int): List<ChatMessage> = emptyList()
+    override suspend fun chatHistory(limit: Int, after: Double?): List<ChatMessage> = emptyList()
     override suspend fun inbox(account: String, query: String?, limit: Int): Inbox = TODO()
     override suspend fun thread(account: String, threadId: String): MailThread = TODO()
     override suspend fun mailAction(account: String, messageId: String, action: String): Ok = TODO()

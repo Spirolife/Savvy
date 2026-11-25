@@ -175,8 +175,8 @@ class ApiClient(
     override suspend fun confirm(id: String, allow: Boolean): Ok =
         post(encode(ConfirmRequest(id, if (allow) "allow" else "deny")), "v1", "chat", "confirm")
 
-    override suspend fun chatHistory(limit: Int): List<ChatMessage> =
-        get("v1", "chat", "history", query = mapOf("limit" to limit.toString()))
+    override suspend fun chatHistory(limit: Int, after: Double?): List<ChatMessage> =
+        get("v1", "chat", "history", query = mapOf("limit" to limit.toString(), "after" to after?.toString()))
 
     // ---- Inbox ---------------------------------------------------------------------------
 

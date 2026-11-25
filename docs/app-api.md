@@ -107,7 +107,7 @@ a second concurrent request gets `409 busy`. Events (each `data:` is JSON):
 | --- | --- | --- | --- |
 | POST | `/v1/chat/confirm` | `{"id": "c1", "decision": "allow"\|"deny"}` | `{"ok": true}` · `404` when nothing is waiting. Unanswered after 5 minutes → deny. |
 | GET | `/v1/chat/turns/{id}/events?after=0` | | `{"events": [{"event": "text", "data": {...}}], "next": 7}` · `404` when that turn is gone |
-| GET | `/v1/chat/history?limit=40` | | `[{"role": "user"\|"assistant", "content": "...", "ts": "...", "surface": "app"\|"signal"\|"desktop"}]` oldest first |
+| GET | `/v1/chat/history?limit=40&after=` | | `[{"role": "user"\|"assistant", "content": "...", "ts": "...", "t": 1764100781.15, "surface": "app"\|"signal"\|"desktop"}]` oldest first. With `after` (a `t`), only messages from other surfaces (desktop, Signal, check-ins) saved since then: the app polls this to stay in step with the desktop window |
 
 **When the stream drops** (Android cuts it when the app goes to the background),
 the turn carries on and its reply is still saved. The app catches up with

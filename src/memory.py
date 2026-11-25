@@ -359,6 +359,20 @@ class Memory:
         # Reverse so they're in chronological order
         return [{"role": r, "content": c, "timestamp": t} for r, c, t in reversed(rows)]
 
+    def retrieve_others_since(self, after: float, n: int = 50) -> list[dict]:
+        """Messages from every other session saved after `after` (a timestamp), oldest first.
+
+        How a chat surface catches up on what was said elsewhere (the app, the
+        desktop window, Signal, check-ins) without reloading its own messages.
+        """
+        rows = self.db.execute(
+            """SELECT role, content, timestamp FROM conversations
+               WHERE timestamp > ? AND session_id IS NOT ?
+               ORDER BY timestamp DESC LIMIT ?""",
+            (after, self.session_id, n),
+        ).fetchall()
+        return [{"role": r, "content": c, "timestamp": t} for r, c, t in reversed(rows)]
+
     def retrieve_facts(self, query: str, top_k: int = 5, annotate: bool = False) -> list[str]:
         """Find relevant stored facts. `annotate` appends the age of non-stable ones."""
         query_emb = _embed(query)

@@ -5,6 +5,7 @@ import java.io.IOException
 import androidx.lifecycle.viewModelScope
 import com.spirolife.savvy.data.api.ApiException
 import com.spirolife.savvy.data.api.ChatEvent
+import com.spirolife.savvy.data.api.ChatMessage
 import com.spirolife.savvy.data.api.SavvyApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -60,6 +61,9 @@ class ChatViewModel(
 
     private var nextKey = 0
     private var turn: Job? = null
+    private var catchingUp: Job? = null
+    /** Newest saved message shown ([ChatMessage.t]); null until history has loaded. */
+    private var seenT: Double? = null
 
     init {
         loadHistory()
@@ -67,21 +71,43 @@ class ChatViewModel(
 
     private fun key(prefix: String) = "$prefix${nextKey++}"
 
+    private fun toItem(m: ChatMessage): ChatItem =
+        if (m.role == "user") ChatItem.User(key("h"), m.content) else ChatItem.Assistant(key("h"), m.content)
+
     fun loadHistory() {
         _state.update { it.copy(loadingHistory = true, historyError = null) }
         viewModelScope.launch {
             try {
                 val history = api.chatHistory(40)
-                val past = history.map {
-                    if (it.role == "user") ChatItem.User(key("h"), it.content)
-                    else ChatItem.Assistant(key("h"), it.content)
-                }
+                val past = history.map(::toItem)
+                seenT = history.mapNotNull { it.t }.maxOrNull() ?: 0.0
                 // Anything sent while history loaded stays after it.
                 _state.update { it.copy(items = past + it.items, loadingHistory = false) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _state.update { it.copy(loadingHistory = false, historyError = friendly(e)) }
+            }
+        }
+    }
+
+    /**
+     * Adds what was said elsewhere (the desktop window, Signal, check-ins) since
+     * the newest message shown. Skipped while history loads or a reply runs;
+     * failures are quiet, as the next check tries again.
+     */
+    fun catchUp() {
+        val after = seenT ?: return
+        if (turn?.isActive == true || catchingUp?.isActive == true) return
+        catchingUp = viewModelScope.launch {
+            try {
+                val newer = api.chatHistory(50, after).filter { (it.t ?: 0.0) > (seenT ?: after) }
+                if (newer.isEmpty() || turn?.isActive == true) return@launch
+                seenT = newer.mapNotNull { it.t }.max()
+                _state.update { s -> s.copy(items = s.items + newer.map(::toItem)) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
             }
         }
     }

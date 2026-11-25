@@ -34,7 +34,7 @@ class ChatViewModelTest {
 
     @Test fun historyLoadsOnOpen() = runTest {
         val vm = ChatViewModel(object : ChatInboxFakeApi() {
-            override suspend fun chatHistory(limit: Int) = listOf(
+            override suspend fun chatHistory(limit: Int, after: Double?) = listOf(
                 ChatMessage("user", "hi", surface = "signal"), ChatMessage("assistant", "hello", surface = "app"))
         })
         val items = vm.state.value.items
@@ -125,6 +125,53 @@ class ChatViewModelTest {
         vm.setDraft("hi"); vm.send()
         assertEquals("model down", vm.state.value.error)
         assertFalse(vm.state.value.running)
+    }
+
+    private fun texts(vm: ChatViewModel) = vm.state.value.items.map {
+        (it as? ChatItem.User)?.text ?: (it as? ChatItem.Assistant)?.text ?: "card"
+    }
+
+    @Test fun catchUpAddsMessagesFromElsewhereOnce() = runTest {
+        val asked = mutableListOf<Double?>()
+        var desktop = listOf(ChatMessage("user", "from the desk", t = 20.0), ChatMessage("assistant", "desk reply", t = 21.0))
+        val vm = ChatViewModel(object : ChatInboxFakeApi() {
+            override suspend fun chatHistory(limit: Int, after: Double?): List<ChatMessage> {
+                if (after == null) return listOf(ChatMessage("user", "earlier", t = 10.0))
+                asked += after
+                return desktop.filter { it.t!! > after }
+            }
+        })
+        vm.catchUp()
+        assertEquals(listOf("earlier", "from the desk", "desk reply"), texts(vm))
+        vm.catchUp()                        // nothing new: nothing added twice
+        assertEquals(3, vm.state.value.items.size)
+        desktop = desktop + ChatMessage("assistant", "check-in", t = 30.0)
+        vm.catchUp()
+        assertEquals("check-in", texts(vm).last())
+        assertEquals(listOf(10.0, 21.0, 21.0), asked)
+    }
+
+    @Test fun catchUpWaitsForHistoryAndForTheReply() = runTest {
+        val historyGate = CompletableDeferred<Unit>()
+        val replyGate = CompletableDeferred<Unit>()
+        var catchUps = 0
+        val vm = ChatViewModel(object : ChatInboxFakeApi() {
+            override suspend fun chatHistory(limit: Int, after: Double?): List<ChatMessage> {
+                if (after == null) { historyGate.await(); return emptyList() }
+                catchUps++; return listOf(ChatMessage("user", "elsewhere", t = 5.0))
+            }
+            override fun chat(message: String) = flow { replyGate.await(); emit(ChatEvent.Done("ok")) }
+        })
+        vm.catchUp()                        // history still loading
+        assertEquals(0, catchUps)
+        historyGate.complete(Unit)
+        vm.setDraft("hi"); vm.send()
+        vm.catchUp()                        // reply in progress
+        assertEquals(0, catchUps)
+        replyGate.complete(Unit)
+        vm.catchUp()
+        assertEquals(1, catchUps)
+        assertEquals("elsewhere", texts(vm).last())
     }
 
     @Test fun droppedStreamCatchesUpInsteadOfFailing() = runTest {

@@ -33,7 +33,8 @@ interface SavvyApi {
     /** A turn's events from index [after] on (counted after Start), for catching up after the stream dropped. */
     suspend fun chatTurnEvents(turnId: String, after: Int): TurnEvents
     suspend fun confirm(id: String, allow: Boolean): Ok
-    suspend fun chatHistory(limit: Int = 40): List<ChatMessage>
+    /** Newest messages from every surface; with [after] (a [ChatMessage.t]), only newer ones said elsewhere. */
+    suspend fun chatHistory(limit: Int = 40, after: Double? = null): List<ChatMessage>
 
     suspend fun inbox(account: String = "all", query: String? = null, limit: Int = 30): Inbox
     suspend fun thread(account: String, threadId: String): MailThread

@@ -53,7 +53,7 @@ import kotlinx.serialization.json.JsonObject
 // Chat
 @Serializable data class ChatRequest(val message: String)
 @Serializable data class ConfirmRequest(val id: String, val decision: String)
-@Serializable data class ChatMessage(val role: String, val content: String, val ts: String? = null, val surface: String? = null)
+@Serializable data class ChatMessage(val role: String, val content: String, val ts: String? = null, val surface: String? = null, val t: Double? = null)
 
 /** One server-sent event of a chat turn (see "Chat" in docs/app-api.md). */
 sealed interface ChatEvent {

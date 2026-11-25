@@ -287,7 +287,13 @@ def history_item(role: str, content: str, ts) -> dict:
         if content.startswith(tag):
             surface, content = name, content[len(tag):]
             break
-    return {"role": role, "content": content, "ts": iso_ts(ts), "surface": surface}
+    try:
+        t = float(ts)
+    except (TypeError, ValueError):
+        t = None
+    # `t` is the exact saved time: the app passes the newest one back as
+    # `after` to catch up (`ts` is rounded to the second, too coarse for that).
+    return {"role": role, "content": content, "ts": iso_ts(ts), "t": t, "surface": surface}
 
 
 def iso_ts(ts) -> str | None:
@@ -299,12 +305,14 @@ def iso_ts(ts) -> str | None:
 
 
 @router.get("/chat/history")
-def history(limit: int = 40):
+def history(limit: int = 40, after: float | None = None):
+    """The newest `limit` messages from every surface; with `after`, only those
+    from other surfaces (desktop, Signal, check-ins) saved since that `t`."""
     from memory import Memory
     limit = max(1, min(limit, 200))
     memory = Memory(session_id=SESSION_ID)
     try:
-        rows = memory.retrieve_recent(n=limit)
+        rows = memory.retrieve_recent(n=limit) if after is None else memory.retrieve_others_since(after, n=limit)
     finally:
         memory.db.close()
     return [history_item(r["role"], r["content"], r["timestamp"]) for r in rows

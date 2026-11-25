@@ -64,6 +64,9 @@ class FakeMemory:
     def retrieve_recent(self, n=10):
         return FakeMemory.rows[-n:]
 
+    def retrieve_others_since(self, after, n=50):
+        return [r for r in FakeMemory.rows if r["timestamp"] > after and r.get("session") != self.session_id][-n:]
+
 
 class ChatTests(unittest.TestCase):
     def setUp(self):
@@ -251,6 +254,17 @@ class ChatTests(unittest.TestCase):
         self.assertEqual([(i["role"], i["content"], i["surface"]) for i in items],
                          [("assistant", "from the app", "app"), ("user", "at the desk", "desktop")])
         self.assertRegex(items[0]["ts"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$")
+        self.assertEqual(items[0]["t"], 1_700_000_001.0)
+
+    def test_history_after_returns_only_newer_messages_from_elsewhere(self):
+        FakeMemory.rows = [
+            {"role": "user", "content": "old desk", "timestamp": 1.0, "session": "desktop"},
+            {"role": "user", "content": "[App] mine", "timestamp": 2.5, "session": "app"},
+            {"role": "user", "content": "new desk", "timestamp": 3.0, "session": "desktop"},
+            {"role": "assistant", "content": "check-in", "timestamp": 4.0, "session": "scheduler"},
+        ]
+        items = self.client.get("/v1/chat/history?after=2.0").json()
+        self.assertEqual([(i["content"], i["t"]) for i in items], [("new desk", 3.0), ("check-in", 4.0)])
 
     def test_app_surface_is_tagged(self):
         self.assertEqual(core.SURFACE_TAG["app"], "[App] ")
