@@ -101,6 +101,46 @@ class MemoryWatchTests(unittest.TestCase):
         self.assertIn("Signal bot was using 950 MB", logged[1])
         tray.tray.showMessage.assert_called_once()
 
+    def heartbeat_service(self, beat_age, started_age=3600):
+        import tempfile, time
+        path = Path(tempfile.mkdtemp()) / "heartbeat"
+        path.touch()
+        now = time.time()
+        os.utime(path, (now - beat_age, now - beat_age))
+        return SimpleNamespace(label="Scheduler", heartbeat=path, heartbeat_stale=False, running=True,
+                               started_at=now - started_age, stop=mock.Mock(), start=mock.Mock())
+
+    def run_heartbeat_check(self, service, paused=False):
+        tray = SimpleNamespace(services=[service], paused=paused, tray=mock.Mock())
+        with mock.patch.object(desktop, "log_memory"):
+            desktop.TrayApp.check_heartbeats(tray)
+        return tray
+
+    def test_stuck_loop_restarts_on_the_second_stale_check(self):
+        s = self.heartbeat_service(beat_age=30 * 60)
+        self.run_heartbeat_check(s)
+        s.stop.assert_not_called()          # first sighting: maybe the PC just woke up
+        tray = self.run_heartbeat_check(s)
+        s.stop.assert_called_once(); s.start.assert_called_once()
+        self.assertIn("stopped responding", tray.tray.showMessage.call_args[0][1])
+
+    def test_fresh_beat_in_between_clears_it(self):
+        s = self.heartbeat_service(beat_age=30 * 60)
+        self.run_heartbeat_check(s)
+        os.utime(s.heartbeat)               # beat again, as a live loop does after waking
+        self.run_heartbeat_check(s)
+        s.stop.assert_not_called()
+
+    def test_no_restart_before_the_first_beat_or_when_paused(self):
+        starting = self.heartbeat_service(beat_age=30 * 60, started_age=60)   # last beat predates this start
+        for _ in range(2):
+            self.run_heartbeat_check(starting)
+        starting.stop.assert_not_called()
+        paused = self.heartbeat_service(beat_age=30 * 60)
+        for _ in range(2):
+            self.run_heartbeat_check(paused, paused=True)
+        paused.stop.assert_not_called()
+
     def test_no_restart_when_off_or_paused(self):
         for kwargs in ({"limit": 0}, {"paused": True}):
             services, tray, logged = self.watch([("Signal bot", 5000.0)], **kwargs)

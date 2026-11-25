@@ -29,6 +29,7 @@ GOOGLE_CREDENTIALS_FILE = CREDENTIALS_DIR / "credentials.json"
 MEMORY_DIR = PROJECT_ROOT / "memory"
 DB_PATH = MEMORY_DIR / "secretary_memory.db"
 SCHEDULER_STATE_PATH = MEMORY_DIR / "scheduler_state.json"
+SCHEDULER_HEARTBEAT_PATH = MEMORY_DIR / "scheduler_heartbeat"   # touched every loop; the tray restarts a stale one
 
 # Notes & durable behavior rules
 NOTES_DIR = PROJECT_ROOT / "notes"

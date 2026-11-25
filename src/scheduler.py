@@ -57,11 +57,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger("secretary.scheduler")
 
+# Google's client library (httplib2) waits forever on a connection that went
+# dead (after sleep or a network change, say), which froze this loop for five
+# days once with no error. A default timeout turns that into a logged error the
+# loop survives. The Anthropic SDK and httpx set their own timeouts.
+import socket
+socket.setdefaulttimeout(120)
+
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-from paths import dfmt, CONFIG_PATH, SCHEDULER_STATE_PATH as STATE_PATH
+from paths import dfmt, CONFIG_PATH, SCHEDULER_STATE_PATH as STATE_PATH, SCHEDULER_HEARTBEAT_PATH
+
+
+def beat() -> None:
+    """Mark that the loop is alive; the tray restarts the scheduler when this goes stale."""
+    try:
+        SCHEDULER_HEARTBEAT_PATH.touch()
+    except OSError:
+        pass
 
 
 def load_config() -> dict:
@@ -536,6 +551,7 @@ def run_scheduler():
     logger.info(f"  Quiet hours:   {config.get('quiet_hours_start', 23)}:00-{config.get('quiet_hours_end', 7)}:00")
 
     while True:
+        beat()
         try:
             config = load_config()
             state = load_state()

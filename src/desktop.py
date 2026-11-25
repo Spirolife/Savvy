@@ -44,7 +44,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from paths import CREDENTIALS_DIR, MEMORY_DIR, PROJECT_ROOT
+from paths import CREDENTIALS_DIR, MEMORY_DIR, PROJECT_ROOT, SCHEDULER_HEARTBEAT_PATH
 
 SRC = PROJECT_ROOT / "src"
 LOG_DIR = PROJECT_ROOT / "logs"
@@ -252,6 +252,7 @@ class SigninChecker(QObject):
 MEMORY_CHECK_MS = 10 * 60 * 1000    # how often service memory is logged and checked
 MEMORY_LIMIT_MB = 800               # default; config "service_memory_limit_mb", 0 turns it off
 MEMORY_LOG = LOG_DIR / "memory.log"
+HEARTBEAT_STALE = 20 * 60          # seconds without a heartbeat before a service counts as stuck
 
 
 def process_memory_mb(pid: int) -> float | None:
@@ -296,9 +297,11 @@ class Service(QObject):
     BACKOFF = [5, 15, 30, 60]   # seconds before restart attempt 1, 2, 3, 4+
     STABLE_AFTER = 120          # an attempt that ran this long resets the backoff
 
-    def __init__(self, label: str, args: list[str], log_name: str, parent=None):
+    def __init__(self, label: str, args: list[str], log_name: str, parent=None, heartbeat: Path | None = None):
         super().__init__(parent)
         self.label, self.args, self.log_path = label, args, LOG_DIR / log_name
+        self.heartbeat = heartbeat     # a file the service touches every loop, if it has one
+        self.heartbeat_stale = False   # stale at the last check (see TrayApp.check_heartbeats)
         self.proc: QProcess | None = None
         self.wanted = False
         self.started_at = 0.0
@@ -724,7 +727,7 @@ class TrayApp(QObject):
 
         self.services = [
             Service("Signal bot", ["secretary.py", "--signal"], "signal.log", self),
-            Service("Scheduler", ["scheduler.py"], "scheduler.log", self),
+            Service("Scheduler", ["scheduler.py"], "scheduler.log", self, heartbeat=SCHEDULER_HEARTBEAT_PATH),
             Service("App server", ["app_server.py"], "app_server.log", self),
         ]
         for s in self.services:
@@ -748,6 +751,7 @@ class TrayApp(QObject):
 
         self.memory_watch = QTimer(self, interval=MEMORY_CHECK_MS)
         self.memory_watch.timeout.connect(self.check_memory)
+        self.memory_watch.timeout.connect(self.check_heartbeats)
         self.memory_watch.start()
 
         self.signin_checker = SigninChecker()
@@ -906,6 +910,37 @@ class TrayApp(QObject):
                 s.stop()
                 s.start()
                 self.tray.showMessage("Savvy", msg, QSystemTrayIcon.MessageIcon.Information, 8000)
+
+    @Slot()
+    def check_heartbeats(self) -> None:
+        """Restart a service whose loop stopped beating (stuck, not crashed).
+
+        Only once it has beaten since it started: one still starting up (waiting
+        for the Signal container, say) hasn't reached its loop yet. And only when
+        it was already stale at the previous check: right after the PC wakes from
+        sleep every heartbeat looks old, but a live loop beats again within minutes.
+        """
+        if self.paused:
+            return
+        now = time.time()
+        for s in self.services:
+            if s.heartbeat is None or not s.running:
+                continue
+            try:
+                last = s.heartbeat.stat().st_mtime
+            except OSError:
+                continue
+            stale = last >= s.started_at and now - last > HEARTBEAT_STALE
+            was_stale, s.heartbeat_stale = s.heartbeat_stale, stale
+            if stale and was_stale:
+                s.heartbeat_stale = False
+                msg = (f"{s.label} stopped responding (nothing for {(now - last) // 60:.0f} minutes), "
+                       "so Savvy restarted it.")
+                log_memory(msg)
+                print(f"[desktop] {msg}")
+                s.stop()
+                s.start()
+                self.tray.showMessage("Savvy", msg, QSystemTrayIcon.MessageIcon.Warning, 8000)
 
     def pair_phone(self) -> None:
         """Show a one-time code for the Savvy phone app (the app server checks it)."""
