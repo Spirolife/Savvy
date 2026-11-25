@@ -59,9 +59,6 @@ echo ""
 # 4. Pull models
 # -----------------------------------------------
 echo "--- Pulling Models ---"
-echo "[•] Pulling Mistral 7B Instruct (Q4_K_M) — ~4.4 GB download..."
-ollama pull mistral:7b-instruct-v0.3-q4_K_M
-
 echo "[•] Pulling nomic-embed-text — ~270 MB download..."
 ollama pull nomic-embed-text
 

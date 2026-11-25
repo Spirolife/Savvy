@@ -57,8 +57,6 @@ if (Test-Ollama) {
 # -----------------------------------------------
 Write-Host ""
 Write-Host "--- Pulling Models ---"
-Write-Host "[..] Pulling Mistral 7B Instruct (Q4_K_M) - ~4.4 GB download..."
-ollama pull mistral:7b-instruct-v0.3-q4_K_M
 Write-Host "[..] Pulling nomic-embed-text - ~270 MB download..."
 ollama pull nomic-embed-text
 Write-Host "[OK] Models ready"

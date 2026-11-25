@@ -20,9 +20,8 @@ model is rendered in the user's timezone.
 import json
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from googleapiclient.discovery import build
 
-from google_auth import get_all_credentials, get_account_labels, stored_account_email
+from google_auth import cached_service, get_all_credentials, get_account_labels, stored_account_email
 from paths import dfmt
 
 try:
@@ -97,7 +96,7 @@ def _get_services() -> list[tuple[str, object]]:
     services = []
     for label, creds in get_all_credentials().items():
         try:
-            svc = build("calendar", "v3", credentials=creds)
+            svc = cached_service("calendar", "v3", label, creds)
             services.append((label, svc))
         except Exception:
             pass

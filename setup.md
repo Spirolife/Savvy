@@ -68,7 +68,7 @@ This will:
 - Install Ollama if missing
 - Start the Ollama server in the background
 - Check for an NVIDIA GPU (warns but does not block if absent)
-- Pull `mistral:7b-instruct-v0.3-q4_K_M` and `nomic-embed-text` models
+- Pull the `nomic-embed-text` embedding model (~270 MB), which memory search uses
 - Create a Python virtual environment and install `requirements.txt`
 - Run the configuration wizard (`setup/configure.py`), which prompts for everything in `credentials/` — Anthropic key, Google OAuth client and account sign-ins, Signal numbers, scheduler times, Todoist/travel keys, tool confirmation levels — and a few starter rules. Every section can be skipped.
 
@@ -306,6 +306,7 @@ Savvy lives in the system tray, like Discord. `setup.sh` offers to start it at t
 The tray app:
 
 - **Runs the Signal bot and scheduler** for you and restarts them if they crash (you get a desktop notification when that happens). It also starts Ollama if it's installed but not running.
+- **Keeps memory in check:** every 10 minutes it writes each service's memory to `logs/memory.log` (the menu shows it too) and restarts a service that goes over 800 MB, with a notification. Change the limit with `"service_memory_limit_mb"` in `credentials/config.json` (`0` turns the restart off).
 - **Shows health in the icon:** green = all good, yellow = running but Ollama is off (memory search falls back to recent messages), red = something Savvy needs is down, grey = paused. Hover for a summary; the menu lists each part.
 - **Opens a chat window** when you click the icon. It's the same Savvy as the terminal and Signal, with the same memory, and shows recent messages from both. Tools that need confirmation pop up an Approve / Deny / Always-allow dialog.
 - **Menu:** pause/start or restart services, open the logs folder, toggle **Start on login**, quit.

@@ -256,6 +256,32 @@ def get_all_credentials() -> dict[str, Credentials]:
     return result
 
 
+_service_cache = threading.local()
+
+
+def cached_service(api: str, version: str, label: str, creds: Credentials):
+    """A Google API client for one account, reused while its access token is the same.
+
+    Building a client parses the API's whole description, so building one per
+    call (as every Gmail/Calendar helper used to) wasted CPU on each chat turn,
+    inbox load and scheduler tick. The cache is per thread because the HTTP
+    library underneath (httplib2) isn't safe to share between threads. A
+    refreshed token or a new sign-in changes the token, which builds a fresh
+    client with the new credentials.
+    """
+    from googleapiclient.discovery import build
+    cache = getattr(_service_cache, "clients", None)
+    if cache is None:
+        cache = _service_cache.clients = {}
+    key = (api, version, label)
+    hit = cache.get(key)
+    if hit is not None and hit[0] == creds.token:
+        return hit[1]
+    svc = build(api, version, credentials=creds, cache_discovery=False)
+    cache[key] = (creds.token, svc)
+    return svc
+
+
 # ---------------------------------------------------------------------------
 # Signing in by link
 # ---------------------------------------------------------------------------

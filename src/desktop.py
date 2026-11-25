@@ -248,6 +248,45 @@ class SigninChecker(QObject):
             self._busy.release()
 
 
+# ---- memory watch -------------------------------------------------------------
+MEMORY_CHECK_MS = 10 * 60 * 1000    # how often service memory is logged and checked
+MEMORY_LIMIT_MB = 800               # default; config "service_memory_limit_mb", 0 turns it off
+MEMORY_LOG = LOG_DIR / "memory.log"
+
+
+def process_memory_mb(pid: int) -> float | None:
+    """Resident memory of a process in MB, or None when it can't be read."""
+    try:
+        with open(f"/proc/{pid}/status", encoding="ascii") as f:    # Linux
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / 1024
+    except (OSError, ValueError):
+        pass
+    try:                                                            # elsewhere, if installed
+        import psutil
+        return psutil.Process(pid).memory_info().rss / 1024 / 1024
+    except Exception:
+        return None
+
+
+def memory_limit_mb() -> int:
+    try:
+        with open(CREDENTIALS_DIR / "config.json", encoding="utf-8") as f:
+            return int(json.load(f).get("service_memory_limit_mb", MEMORY_LIMIT_MB))
+    except (OSError, ValueError, TypeError):
+        return MEMORY_LIMIT_MB
+
+
+def log_memory(line: str) -> None:
+    try:
+        LOG_DIR.mkdir(exist_ok=True)
+        with open(MEMORY_LOG, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now():%Y-%m-%d %H:%M}  {line}\n")
+    except OSError:
+        pass
+
+
 class Service(QObject):
     """One supervised child process, restarted with backoff if it exits on its own."""
 
@@ -302,6 +341,10 @@ class Service(QObject):
         p.setWorkingDirectory(str(SRC))
         env = QProcessEnvironment.systemEnvironment()
         env.insert("PYTHONUTF8", "1")
+        # glibc gives each thread its own malloc arena, and freed memory in them
+        # is rarely returned, so threaded services (the app server's request
+        # pool, the bot) slowly grow over days. Two arenas keep that in check.
+        env.insert("MALLOC_ARENA_MAX", "2")
         p.setProcessEnvironment(env)
         p.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         p.setStandardOutputFile(str(self.log_path), QIODeviceBase.OpenModeFlag.Append)
@@ -322,11 +365,18 @@ class Service(QObject):
             self.retry.start(delay * 1000)
         self.changed.emit()
 
+    def memory_mb(self) -> float | None:
+        """Memory the running process holds (resident set), in MB; None if unknown."""
+        if not self.running:
+            return None
+        return process_memory_mb(int(self.proc.processId()))
+
     def describe(self) -> str:
         if self.running:
             mins = int((time.time() - self.started_at) // 60)
             up = f"{mins // 60}h {mins % 60}m" if mins >= 60 else f"{mins}m"
-            return f"running · {up}"
+            mb = self.memory_mb()
+            return f"running · {up}" + (f" · {mb:.0f} MB" if mb else "")
         if self.restarting:
             return "crashed · restarting"
         return "stopped"
@@ -696,6 +746,10 @@ class TrayApp(QObject):
         self.poll.timeout.connect(self.refresh)        # keeps uptimes fresh
         self.poll.start()
 
+        self.memory_watch = QTimer(self, interval=MEMORY_CHECK_MS)
+        self.memory_watch.timeout.connect(self.check_memory)
+        self.memory_watch.start()
+
         self.signin_checker = SigninChecker()
         self.signin_checker.result.connect(self._on_signin_links)
         self.signin_poll = QTimer(self, interval=60000)  # each check calls Google
@@ -828,6 +882,30 @@ class TrayApp(QObject):
     def restart_services(self) -> None:
         self.stop_services()
         self.start_services()
+
+    @Slot()
+    def check_memory(self) -> None:
+        """Log every service's memory to logs/memory.log; restart one over the limit.
+
+        A long-running service that keeps growing would otherwise take gigabytes
+        over a few days. The log shows which one grows and how fast.
+        """
+        readings = [(s, s.memory_mb()) for s in self.services]
+        tray_mb = process_memory_mb(os.getpid())
+        parts = [f"{s.label} {mb:.0f}" for s, mb in readings if mb] + ([f"Tray {tray_mb:.0f}"] if tray_mb else [])
+        if parts:
+            log_memory("MB  " + "  ".join(parts))
+        limit = memory_limit_mb()
+        if self.paused or limit <= 0:
+            return
+        for s, mb in readings:
+            if mb and mb > limit:
+                msg = f"{s.label} was using {mb:.0f} MB (limit {limit} MB), so Savvy restarted it."
+                log_memory(msg)
+                print(f"[desktop] {msg}")
+                s.stop()
+                s.start()
+                self.tray.showMessage("Savvy", msg, QSystemTrayIcon.MessageIcon.Information, 8000)
 
     def pair_phone(self) -> None:
         """Show a one-time code for the Savvy phone app (the app server checks it)."""

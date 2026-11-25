@@ -5,16 +5,15 @@ Gmail integration — multi-account. Full read, send, modify, label, thread supp
 import base64
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
-from googleapiclient.discovery import build
 
-from google_auth import get_all_credentials
+from google_auth import cached_service, get_all_credentials
 
 
 def _get_services() -> list[tuple[str, object]]:
     services = []
     for label, creds in get_all_credentials().items():
         try:
-            svc = build("gmail", "v1", credentials=creds)
+            svc = cached_service("gmail", "v1", label, creds)
             services.append((label, svc))
         except Exception:
             pass
