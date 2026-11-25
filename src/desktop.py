@@ -34,7 +34,9 @@ from PySide6.QtCore import (
     QThread, QTimer, QUrl, Signal, Slot,
 )
 from PySide6.QtGui import (
-    QAction, QColor, QDesktopServices, QIcon, QKeyEvent, QPainter, QPixmap,
+    QAction, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QKeyEvent,
+    QPainter, QPalette, QPixmap, QTextBlockFormat, QTextCharFormat, QTextCursor,
+    QTextLength, QTextTableFormat,
 )
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtSvg import QSvgRenderer
@@ -385,15 +387,63 @@ class Service(QObject):
         return "stopped"
 
 
+def start_signal_container() -> bool:
+    """Start the signal-api container if a runtime has it. True if a start succeeded.
+
+    Rootless Podman has no daemon, so the container's restart policy does
+    nothing after a reboot; without this the bot and scheduler come up to a
+    dead Signal API every time you log in.
+    """
+    import shutil
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    for rt in ("podman", "docker"):
+        if not shutil.which(rt):
+            continue
+        try:
+            if rt == "podman" and platform.system() != "Linux":
+                subprocess.run([rt, "machine", "start"], capture_output=True, timeout=120, creationflags=flags)
+            r = subprocess.run([rt, "start", "signal-api"], capture_output=True, timeout=60, creationflags=flags)
+            if r.returncode == 0:
+                return True
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return False
+
+
 class HealthChecker(QObject):
-    """Polls Ollama and the Signal container off the UI thread."""
+    """Polls Ollama and the Signal container off the UI thread, starting the container if it's down."""
 
     result = Signal(dict)
+    START_EVERY = 120           # seconds between container start attempts
+
+    def __init__(self):
+        super().__init__()
+        self._last_start = 0.0
+        self._busy = threading.Lock()
 
     def check_async(self) -> None:
         threading.Thread(target=self._check, daemon=True).start()
 
     def _check(self) -> None:
+        if not self._busy.acquire(blocking=False):
+            return                  # a start attempt is still in progress
+        try:
+            out = self._probe()
+            if not out["signal_api"] and time.time() - self._last_start > self.START_EVERY:
+                self._last_start = time.time()
+                out["signal_starting"] = True
+                self.result.emit(out)
+                if start_signal_container():
+                    for _ in range(30):         # the API takes a few seconds to answer
+                        time.sleep(1)
+                        out = self._probe()
+                        if out["signal_api"]:
+                            break
+            self.result.emit(out)
+        finally:
+            self._busy.release()
+
+    def _probe(self) -> dict:
         import httpx
         from notifier import load_config
         cfg = load_config()
@@ -411,7 +461,7 @@ class HealthChecker(QObject):
             out["signal_account"] = cfg.get("sender_number") in accounts
         except (httpx.HTTPError, ValueError):
             pass
-        self.result.emit(out)
+        return out
 
 
 # ===========================================================================
@@ -444,7 +494,7 @@ class ChatWorker(QObject):
     """Runs Savvy turns on its own thread; owns the API client and DB connection."""
 
     chunk = Signal(str)
-    tool = Signal(str)
+    tool = Signal(dict)                 # describe_tool_result() + "name"
     done = Signal(str)
     failed = Signal(str)
     history = Signal(list)
@@ -473,6 +523,10 @@ class ChatWorker(QObject):
         self._decided.wait()
         return self._decision
 
+    def _tool_event(self, name: str, _inp: dict, result: str) -> None:
+        from tool_diagnostics import describe_tool_result
+        self.tool.emit({"name": name, **describe_tool_result(name, result)})
+
     def answer(self, decision: str) -> None:            # GUI thread
         self._decision = decision
         self._decided.set()
@@ -498,7 +552,7 @@ class ChatWorker(QObject):
             reply, _, _ = respond(
                 self.client, self.memory, text, surface="repl",
                 stream_callback=self.chunk.emit,
-                tool_event_callback=lambda name, _inp, _res: self.tool.emit(name),
+                tool_event_callback=self._tool_event,
             )
             self.done.emit(reply)
         except Exception as e:
@@ -542,8 +596,22 @@ class ConfirmDialog(QDialog):
         self.accept()
 
 
-def _md_quote(text: str) -> str:
-    return "\n".join("> " + line if line else ">" for line in text.splitlines())
+# Tool-card badge text and accent color per state. Cards are what the app
+# actually ran (built from the tool's own result), so they're styled unlike
+# anything the model can write: monospace, tinted, with a colored edge.
+TOOL_STATES = {
+    "read":   ("READ",   "#7f8c8d"),
+    "done":   ("DONE",   "#27ae60"),
+    "failed": ("FAILED", "#e74c3c"),
+    "denied": ("DENIED", "#e67e22"),
+}
+
+
+def _mix(a: QColor, b: QColor, t: float) -> QColor:
+    """Blend b into a by t (0..1) — tints that work in light and dark themes."""
+    return QColor(round(a.red() + (b.red() - a.red()) * t),
+                  round(a.green() + (b.green() - a.green()) * t),
+                  round(a.blue() + (b.blue() - a.blue()) * t))
 
 
 class ChatWindow(QWidget):
@@ -581,7 +649,7 @@ class ChatWindow(QWidget):
         lay.addWidget(self.status)
         lay.addLayout(row)
 
-        self.messages: list[tuple[str, str]] = []   # (who, markdown)
+        self.messages: list[tuple] = []   # ("you"|"savvy"|"note", text) or ("tool", info)
         self.busy = False
         self._render_timer = QTimer(self, singleShot=True, interval=60)
         self._render_timer.timeout.connect(self._render)
@@ -602,19 +670,89 @@ class ChatWindow(QWidget):
 
     # ---- rendering -------------------------------------------------------
     def _render(self) -> None:
-        parts = []
-        for who, text in self.messages:
-            if who == "you":
-                parts.append(f"**You**\n\n{_md_quote(text)}")
-            elif who == "savvy":
-                parts.append(f"**Savvy**\n\n{text or '…'}")
-            else:
-                parts.append(f"*{text}*")
         bar = self.view.verticalScrollBar()
         at_bottom = bar.value() >= bar.maximum() - 40
-        self.view.setMarkdown("\n\n---\n\n".join(parts))
+        self.view.clear()
+        cur = self.view.textCursor()
+        pal = self.view.palette()
+        base, text = pal.color(QPalette.ColorRole.Base), pal.color(QPalette.ColorRole.Text)
+        accent = pal.color(QPalette.ColorRole.Highlight)
+        mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        first = True
+        prev = None
+        for who, payload in self.messages:
+            who, _, via = who.partition(":")
+            via = " · via Signal" if via == "signal" else ""
+            if who == "savvy" and not str(payload).strip() and prev == "tool":
+                continue            # the "\n" streamed before a tool call
+            if not first:
+                cur.insertBlock(QTextBlockFormat(), QTextCharFormat())
+            first = False
+            if who == "you":
+                self._label(cur, "You" + via, accent)
+                self._card(cur, payload, _mix(base, accent, 0.12), accent)
+            elif who == "savvy":
+                if prev not in ("savvy", "tool"):
+                    self._label(cur, "Savvy" + via, QColor("#2bb3a3"))
+                if payload.strip():
+                    cur.insertMarkdown(payload.strip())
+                else:
+                    cur.insertText("…")
+            elif who == "tool":
+                if prev not in ("savvy", "tool"):
+                    self._label(cur, "Savvy", QColor("#2bb3a3"))
+                badge, color = TOOL_STATES.get(payload["state"], ("TOOL", "#888888"))
+                c = QColor(color)
+                line = f"{badge:<6}  {payload['name']}  →  {payload['detail']}"
+                if payload.get("warning"):
+                    line += f"\n⚠ {payload['warning']}"
+                self._card(cur, line, _mix(base, c, 0.10), c, font=mono)
+            else:
+                fmt = QTextCharFormat()
+                fmt.setFontItalic(True)
+                fmt.setForeground(_mix(text, base, 0.45))
+                cur.insertText(str(payload), fmt)
+            prev = who
+        self.view.setTextCursor(cur)
         if at_bottom:
             bar.setValue(bar.maximum())
+
+    @staticmethod
+    def _label(cur: QTextCursor, name: str, color: QColor) -> None:
+        bf = QTextBlockFormat()
+        bf.setTopMargin(6)
+        cur.setBlockFormat(bf)
+        fmt = QTextCharFormat()
+        fmt.setFontWeight(QFont.Weight.Bold)
+        fmt.setForeground(color)
+        cur.insertText(name, fmt)
+        cur.insertBlock(QTextBlockFormat(), QTextCharFormat())
+
+    @staticmethod
+    def _card(cur: QTextCursor, content: str, bg: QColor, edge: QColor,
+              font: QFont | None = None) -> None:
+        """A 1x2 table: thin colored edge cell + tinted content cell."""
+        tf = QTextTableFormat()
+        tf.setBorder(0)
+        tf.setCellSpacing(0)
+        tf.setCellPadding(6)
+        tf.setWidth(QTextLength(QTextLength.Type.PercentageLength, 100))
+        tf.setColumnWidthConstraints([QTextLength(QTextLength.Type.FixedLength, 4),
+                                      QTextLength(QTextLength.Type.VariableLength, 0)])
+        table = cur.insertTable(1, 2, tf)
+        edge_cell = table.cellAt(0, 0).format()
+        edge_cell.setBackground(edge)
+        table.cellAt(0, 0).setFormat(edge_cell)
+        body = table.cellAt(0, 1)
+        body_fmt = body.format()
+        body_fmt.setBackground(bg)
+        body.setFormat(body_fmt)
+        c = body.firstCursorPosition()
+        fmt = QTextCharFormat()
+        if font is not None:
+            fmt.setFont(font)
+        c.insertText(content, fmt)
+        cur.movePosition(QTextCursor.MoveOperation.End)
 
     def _schedule_render(self) -> None:
         if not self._render_timer.isActive():
@@ -656,8 +794,7 @@ class ChatWindow(QWidget):
             who, text = ("you" if r["role"] == "user" else "savvy"), r["content"]
             if text.startswith("[Signal] "):
                 text = text[len("[Signal] "):]
-                if who == "you":
-                    text += "\n\n*via Signal*"
+                who += ":signal"
             hist.append((who, text))
         if hist:
             hist.append(("note", "earlier messages above"))
@@ -666,16 +803,27 @@ class ChatWindow(QWidget):
         self.view.verticalScrollBar().setValue(self.view.verticalScrollBar().maximum())
 
     def _on_chunk(self, text: str) -> None:
+        if self.messages[-1][0] != "savvy":     # text resuming after a tool card
+            self.messages.append(("savvy", ""))
         who, cur = self.messages[-1]
         self.messages[-1] = (who, cur + text)
         self.status.setText("Savvy is typing…")
         self._schedule_render()
 
-    def _on_tool(self, name: str) -> None:
-        self.status.setText(f"Savvy used {name.replace('_', ' ')}…")
+    def _on_tool(self, info: dict) -> None:
+        if self.messages and self.messages[-1] == ("savvy", ""):
+            self.messages.pop()                 # nothing streamed before the call
+        self.messages.append(("tool", info))
+        self.status.setText("Savvy is working…")
+        self._schedule_render()
 
     def _on_done(self, reply: str) -> None:
-        self.messages[-1] = ("savvy", reply or "(done)")
+        # The streamed text after the last tool card is the reply; keep earlier
+        # narration and cards as they appeared.
+        if self.messages[-1][0] == "savvy":
+            self.messages[-1] = ("savvy", reply or self.messages[-1][1] or "(done)")
+        elif reply:
+            self.messages.append(("savvy", reply))
         self._finish()
 
     def _on_failed(self, err: str) -> None:
@@ -831,7 +979,8 @@ class TrayApp(QObject):
         self.lines["bot"].setText(f"{dot(bot.running)}  Signal bot: {bot.describe()}")
         self.lines["scheduler"].setText(f"{dot(sched.running)}  Scheduler: {sched.describe()}")
         sig = ("up" if h.get("signal_account") else "up, number not registered"
-               if h.get("signal_api") else "down") if h else "checking…"
+               if h.get("signal_api") else "starting…" if h.get("signal_starting")
+               else "down") if h else "checking…"
         self.lines["signal"].setText(f"{dot(h.get('signal_account'))}  Signal container: {sig}")
         oll = ("running" if h.get("ollama") else "off") if h else "checking…"
         self.lines["ollama"].setText(f"{dot(h.get('ollama'))}  Ollama (memory search): {oll}")

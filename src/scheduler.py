@@ -21,7 +21,7 @@ from pathlib import Path
 import anthropic
 
 from memory import Memory
-from notifier import load_config as load_signal_config, send_notification, check_signal_api
+from notifier import load_config as load_signal_config, send_notification, check_signal_api, wait_for_signal_api
 from diary import (
     has_entry_today, get_today_entries, get_recent_entries,
     get_weekly_summary_data, format_entries_for_context,
@@ -518,16 +518,20 @@ def run_scheduler():
     memory = Memory(session_id="scheduler")
     client = get_client()
 
-    # Verify Signal. Only required while nothing else reaches the user: with
-    # the phone app paired, Signal is just the optional fallback.
-    signal_status = check_signal_api(config)
-    if not signal_status["ok"] or not config.get("sender_number") or not config.get("recipient_number"):
-        problem = signal_status.get("error") or "configure sender_number and recipient_number in config.json"
-        if not notify.has_app_device():
-            logger.error(f"Signal not available ({problem}) and no phone app is paired")
-            return
-        if notify.signal_enabled(config):
+    # Verify Signal. With the phone app paired, Signal is only the optional
+    # fallback, so start without it. Without one, Signal is the only way to reach
+    # the user: wait for its container (it can come up after Savvy does).
+    signal_configured = bool(config.get("sender_number") and config.get("recipient_number"))
+    if notify.has_app_device():
+        signal_status = check_signal_api(config)
+        if notify.signal_enabled(config) and not (signal_status["ok"] and signal_configured):
+            problem = signal_status.get("error") or "sender_number/recipient_number not set in config.json"
             logger.warning(f"Signal not available ({problem}); notifying the phone app only")
+    else:
+        wait_for_signal_api(config, logger)
+        if not signal_configured:
+            logger.error("Configure sender_number and recipient_number in config.json")
+            return
 
     # Verify Anthropic
     try:

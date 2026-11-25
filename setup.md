@@ -246,9 +246,11 @@ With option 2, both numbers are the same.
 
 ### 4d. Optional: auto-start the container on login
 
+**Using the tray app (section 6)?** Nothing to do: it starts the container whenever it finds it stopped, including right after login.
+
 **Docker:** nothing to do — the container is created with `--restart unless-stopped`.
 
-**Podman:**
+**Podman** (rootless Podman has no daemon, so the restart policy does nothing after a reboot):
 
 ```bash
 mkdir -p ~/.config/systemd/user

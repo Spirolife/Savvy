@@ -378,6 +378,42 @@ def _summarize(name: str, r: dict) -> str:
     return ""
 
 
+def describe_tool_result(name: str, result: str) -> dict:
+    """What a tool call actually did, from its result — not from the model's prose.
+
+    Returns {"level", "state" ("read" | "done" | "failed" | "denied"),
+    "detail", "warning"}. Shared by the terminal line below and the desktop
+    chat window's tool cards.
+    """
+    parsed = None
+    try:
+        parsed = json.loads(result)
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    level = get_danger_level(name)
+    warning = ""
+    if isinstance(parsed, dict) and parsed.get("denied"):
+        state, detail = "denied", "you denied this call"
+    elif isinstance(parsed, dict) and (parsed.get("success") is False or "error" in parsed):
+        state = "failed"
+        detail = _short(parsed.get("error") or parsed.get("reason") or parsed.get("message") or "failed", 160)
+    elif level == 0:
+        # Reads: just how much came back.
+        state = "read"
+        if isinstance(parsed, (dict, list)):
+            detail = f"{len(parsed)} item(s)" if isinstance(parsed, list) else "ok"
+        else:
+            n = len(str(result).strip().splitlines())
+            detail = _short(result, 60) if n == 1 else f"{n} lines"
+    else:
+        state = "done"
+        detail = _summarize(name, parsed) if isinstance(parsed, dict) else _short(result)
+        if isinstance(parsed, dict) and parsed.get("warning"):
+            warning = _short(parsed["warning"], 120)
+    return {"level": level, "state": state, "detail": detail, "warning": warning}
+
+
 def log_tool_result(call_id: str, name: str, result: str) -> None:
     """Print one line about the result and log it in full."""
     parsed = None
@@ -386,24 +422,15 @@ def log_tool_result(call_id: str, name: str, result: str) -> None:
     except (json.JSONDecodeError, TypeError):
         pass
 
-    level = get_danger_level(name)
-    failed = isinstance(parsed, dict) and (parsed.get("success") is False or "error" in parsed)
-
-    if failed:
-        why = parsed.get("error") or parsed.get("reason") or parsed.get("message") or "failed"
-        print(f"{RED}✗ {_tag(level)} {name}{RESET}  {_short(why, 160)}")
-    elif level == 0:
-        # Reads: just how much came back.
-        if isinstance(parsed, (dict, list)):
-            size = f"{len(parsed)} item(s)" if isinstance(parsed, list) else "ok"
-        else:
-            n = len(str(result).strip().splitlines())
-            size = _short(result, 60) if n == 1 else f"{n} lines"
-        print(f"{DIM}· {_tag(level)} {name}  → {size}{RESET}")
+    d = describe_tool_result(name, result)
+    level = d["level"]
+    if d["state"] in ("failed", "denied"):
+        print(f"{RED}✗ {_tag(level)} {name}{RESET}  {d['detail']}")
+    elif d["state"] == "read":
+        print(f"{DIM}· {_tag(level)} {name}  → {d['detail']}{RESET}")
     else:
-        detail = _summarize(name, parsed) if isinstance(parsed, dict) else _short(result)
-        warn = f"  {YELLOW}⚠ {_short(parsed['warning'], 120)}{RESET}" if isinstance(parsed, dict) and parsed.get("warning") else ""
-        print(f"{GREEN}✓{RESET} {LEVEL_COLORS[level]}{_tag(level)} {name}{RESET}  {detail}{warn}")
+        warn = f"  {YELLOW}⚠ {d['warning']}{RESET}" if d["warning"] else ""
+        print(f"{GREEN}✓{RESET} {LEVEL_COLORS[level]}{_tag(level)} {name}{RESET}  {d['detail']}{warn}")
 
     _audit_write({
         "call_id": call_id, "phase": "result",

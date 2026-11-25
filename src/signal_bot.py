@@ -20,7 +20,7 @@ import anthropic
 
 from core import respond, finish_pasted_signin, CALENDAR_AVAILABLE, EMAIL_AVAILABLE
 from memory import Memory
-from notifier import load_config, check_signal_cli, send_message, receive_messages, allowed_senders
+from notifier import load_config, wait_for_signal_api, send_message, receive_messages, allowed_senders
 from liveness import announce_up
 from diary import store_entry
 from paths import dfmt
@@ -261,10 +261,7 @@ def run_bot():
         sys.exit(1)
 
     # Verify signal-cli
-    status = check_signal_cli(config)
-    if not status["ok"]:
-        logger.error(f"signal-cli not available: {status['error']}")
-        sys.exit(1)
+    status = wait_for_signal_api(config, logger)
     logger.info(f"signal-cli: {status['version']}")
 
     # Verify Claude API

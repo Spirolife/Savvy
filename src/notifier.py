@@ -11,6 +11,7 @@ Setup:
 
 import json
 import logging
+import time
 from pathlib import Path
 
 import httpx
@@ -70,6 +71,29 @@ def check_signal_api(config: dict | None = None) -> dict:
 
 # Keep old name for compatibility with signal_bot.py / secretary.py
 check_signal_cli = check_signal_api
+
+
+def wait_for_signal_api(config: dict | None = None, log=None, retry_seconds: int = 15) -> dict:
+    """Block until the signal-cli-rest-api container answers; return its status.
+
+    After a reboot the container can come up after Savvy does (rootless Podman
+    has no daemon to restart it; the tray app or the user starts it). Exiting
+    here used to turn that into a restart loop, so wait instead — logging the
+    first failure and then every five minutes, not every retry.
+    """
+    log = log or logger
+    waited, last_logged = 0, -1
+    while True:
+        status = check_signal_api(config)
+        if status["ok"]:
+            if waited:
+                log.info(f"Signal API is back after {waited}s")
+            return status
+        if last_logged < 0 or waited - last_logged >= 300:
+            log.warning(f"Signal API not available ({status['error']}) — waiting for it")
+            last_logged = waited
+        time.sleep(retry_seconds)
+        waited += retry_seconds
 
 
 # Signal delivers long messages poorly and they read badly on a phone, so a
