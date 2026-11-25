@@ -718,6 +718,9 @@ def execute_tool(name: str, inp: dict) -> str:
 # How many times a turn may be resumed after hitting max_tokens before we give
 # up. Each continuation is a fresh API call, so this bounds cost and latency.
 MAX_CONTINUATIONS = 6
+# Ceiling when a reply ran out of room before any text and is retried bigger;
+# kept under ~16K so non-streaming requests stay clear of HTTP timeouts.
+MAX_RETRY_TOKENS = 16000
 
 
 def _cache_marker(system) -> dict:
@@ -732,6 +735,14 @@ def _cache_marker(system) -> dict:
 # Models that take a server-side refusal fallback ("default" routes by refusal
 # category, so there's no fallback model list to maintain).
 _FALLBACK_MODELS = {"claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5", "claude-fable-5-1"}
+
+# Models that think when the request doesn't set `thinking` (Savvy never sends
+# "disabled", so "off" leaves them thinking too). Thinking counts toward
+# max_tokens: on Claude Haiku 5.5 at effort "high", a 1024 cap went entirely to
+# thinking and the reply stopped before any text.
+_THINKS_BY_DEFAULT = _FALLBACK_MODELS | {
+	"claude-haiku-5-5", "claude-sonnet-5", "claude-fable-5", "claude-fable-5-2",
+}
 
 
 def request_options(config: dict, model: str, max_tokens: int) -> tuple[dict, int]:
@@ -750,7 +761,7 @@ def request_options(config: dict, model: str, max_tokens: int) -> tuple[dict, in
 	thinking = config.get("thinking")
 	if thinking and thinking != "off":
 		opts["thinking"] = {"type": thinking}
-	thinks = (thinking not in (None, "off", "between_tools")) or (thinking is None and model in _FALLBACK_MODELS)
+	thinks = thinking != "between_tools" and (thinking not in (None, "off") or model in _THINKS_BY_DEFAULT)
 	if thinks:
 		max_tokens = max(max_tokens, int(config.get("thinking_max_tokens", 8000)))
 	if model in _FALLBACK_MODELS and config.get("refusal_fallback", True):
@@ -836,8 +847,26 @@ def chat_with_tools(client, model, system, messages, max_tokens=1024, stream_cal
 		text_accum.extend(text_parts)
 
 		if resp.stop_reason == "refusal":
-			reply = "".join(text_accum).strip() or "Sorry — I can't help with that one."
+			details = getattr(resp, "stop_details", None)
+			category = getattr(details, "category", None)
+			print(f"[tools] Refused by the safety filter (category {category!r}): "
+			      f"{getattr(details, 'explanation', None) or 'no explanation'}")
+			reply = "".join(text_accum).strip() or (
+				"The model's safety filter blocked that reply"
+				+ (f" ({category})" if category else "")
+				+ ". It sometimes catches harmless requests; try rephrasing it.")
 			return reply, total_in, total_out
+
+		# Out of room while still thinking, before writing anything: asking it
+		# to "continue" a reply that has no text reads like a request for its
+		# hidden reasoning, which the safety filter declines. Retry the same
+		# request with more room instead, dropping the cut-off turn.
+		if resp.stop_reason == "max_tokens" and not text_parts and continuations < max_continuations:
+			continuations += 1
+			current_messages.pop()
+			max_tokens = min(max_tokens * 2, MAX_RETRY_TOKENS)
+			print(f"[tools] Used all of max_tokens thinking, before any text — retrying with {max_tokens:,}.")
+			continue
 
 		if resp.stop_reason == "max_tokens" and continuations < max_continuations:
 			continuations += 1
